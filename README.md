@@ -16,6 +16,8 @@ Run these commands from this directory in PowerShell:
 
 The authenticated MCP address is `http://127.0.0.1:8766/mcp`. The server name in Codex is `desktop-office`. Reload the MCP connection or start a new Codex session after registration. An existing session can retain its previous tool list.
 
+The full runtime OpenAPI document is available at `http://127.0.0.1:8766/openapi.json` while the server is running. It includes the management endpoints as well as the action endpoints. A generated snapshot is kept in `openapi.json` for inspection while the server is stopped; regenerate it after changing the API.
+
 Use an unlocked Windows session. Outlook COM attaches to Outlook or starts it when absent. Teams starts minimized from its registered installation when no Teams process is running. An existing meeting or an unavailable main view returns `app_not_ready` instead of starting a second instance. Cold app launch was checked with synthetic launch tests; existing live apps were not closed to test it.
 
 Teams uses UI Automation text values and button invocation. It does not use simulated keys, mouse input, focus calls, or the clipboard. Reading the active chat works in the background. Switching chats can activate Teams, so background navigation returns `navigation_requires_foreground` before selecting anything. Open the target chat yourself, or use navigation while Teams is already foreground and idle. It refuses navigation or sending while you are editing in the foreground Teams window, and refuses to replace an existing composer draft. Results cover recognized loaded chats and currently loaded messages. Inbox listing and search inspect at most the newest 500 items.

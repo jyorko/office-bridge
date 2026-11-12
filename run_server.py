@@ -41,5 +41,5 @@ if __name__ == "__main__":
     main([
         "start", "--address", "127.0.0.1", "--port", "8766",
         "--dir", str(ROOT / ".package"), "--datadir", str(STATE / "managed-server"),
-        "--min-processes", "1", "--max-processes", "1",
+        "--min-processes", "1", "--max-processes", "1", "--full-openapi-spec",
     ] + (["--auto-reload"] if dev else ["--api-key", key]))
