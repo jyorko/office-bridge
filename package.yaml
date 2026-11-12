@@ -21,6 +21,7 @@ packaging:
     - ./design/**
     - ./.venv/**
     - ./.runtime/**
+    - ./.package/**
     - ./.action-server/**
     - ./.state/**
     - ./run_server.py

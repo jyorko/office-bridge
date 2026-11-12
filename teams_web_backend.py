@@ -13,6 +13,38 @@ TEAMS_URL = "https://teams.cloud.microsoft/"
 _lock = threading.Lock()
 
 
+def _attachment_denied(context) -> bool:
+    """Distinguish a browser access restriction from a closed navigation tab."""
+    session = None
+    try:
+        session = context.browser.new_browser_cdp_session()
+        deadline = time.monotonic() + 10
+        targets = []
+        while time.monotonic() < deadline:
+            targets = [target for target in session.send("Target.getTargets")["targetInfos"]
+                       if target.get("type") == "page" and urlsplit(target.get("url", "")).hostname == "teams.cloud.microsoft"]
+            if targets:
+                break
+            time.sleep(0.25)
+        for target in targets:
+            try:
+                attached = session.send("Target.attachToTarget", {"targetId": target["targetId"], "flatten": True})
+            except Exception as exc:
+                if "(Target.attachToTarget): Not allowed" in str(exc):
+                    return True
+                raise
+            session.send("Target.detachFromTarget", {"sessionId": attached["sessionId"]})
+    except Exception:
+        return False
+    finally:
+        if session is not None:
+            try:
+                session.detach()
+            except Exception:
+                pass
+    return False
+
+
 def _visible(page, selector: str) -> bool:
     try:
         return page.locator(selector).first.is_visible(timeout=250)
@@ -90,6 +122,8 @@ def status() -> dict[str, str]:
                 host, path, state = "teams.cloud.microsoft", "/", "access_blocked"
             return {"state": state, "hostname": host, "path": path[:200]}
         except Exception:
+            if context is not None and _attachment_denied(context):
+                return {"state": "access_blocked", "hostname": "teams.cloud.microsoft", "path": "/", "reason": "browser_attachment_denied"}
             return {"state": "failed", "hostname": "teams.cloud.microsoft", "path": "/"}
         finally:
             if context is not None:

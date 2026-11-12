@@ -59,3 +59,20 @@ def test_status_uses_supported_browser_configuration_and_releases_lock(tmp_path,
     })
     assert calls[-1][0] == "close"
     assert backend.status()["state"] == "authenticated"
+
+
+def test_browser_attachment_denial_is_reported():
+    calls = []
+
+    class Session:
+        def send(self, method, params=None):
+            if method == "Target.getTargets":
+                return {"targetInfos": [{"type": "page", "url": "https://teams.cloud.microsoft/", "targetId": "teams"}]}
+            raise RuntimeError("CDPSession.send: Protocol error (Target.attachToTarget): Not allowed")
+
+        def detach(self):
+            calls.append("detached")
+
+    context = SimpleNamespace(browser=SimpleNamespace(new_browser_cdp_session=lambda: Session()))
+    assert backend._attachment_denied(context)
+    assert calls == ["detached"]

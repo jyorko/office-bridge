@@ -11,6 +11,7 @@ class TeamsWebStatus(BaseModel):
     state: Literal["authenticated", "needs_interactive_login", "access_blocked", "failed"]
     hostname: str
     path: str
+    reason: Literal["browser_attachment_denied"] | None = None
 
 
 @action(is_consequential=False)

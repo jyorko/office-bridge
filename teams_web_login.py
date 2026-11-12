@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from robocorp import browser
+from playwright.sync_api import Error
 
 
 def login() -> None:
@@ -13,15 +14,29 @@ def login() -> None:
         headless=False,
         persistent_context_directory=str(profile),
     )
-    context = None
+    context = browser.context()
     try:
-        page = browser.page()
-        context = page.context
-        page.goto("https://teams.cloud.microsoft/", wait_until="domcontentloaded", timeout=20000)
-        input("Complete sign-in in the isolated Teams browser, then press Enter: ")
+        # Keep the initial tab available if Teams closes its navigation tab.
+        page = context.new_page()
+        try:
+            page.goto("https://teams.cloud.microsoft/", wait_until="domcontentloaded", timeout=20000)
+        except Error as exc:
+            print(f"Teams navigation failed ({type(exc).__name__}); keeping the isolated profile open.", flush=True)
+            remaining = context.pages
+            if remaining:
+                try:
+                    remaining[0].goto("https://login.microsoftonline.com/", wait_until="domcontentloaded", timeout=20000)
+                except Error as fallback:
+                    print(f"Microsoft sign-in navigation: {type(fallback).__name__}", flush=True)
+        print("Complete sign-in in this isolated Edge window. Close its windows when finished.", flush=True)
+        while context.pages:
+            try:
+                context.pages[0].wait_for_timeout(500)
+            except Error:
+                if not context.pages:
+                    break
     finally:
-        if context is not None:
-            context.close()
+        context.close()
 
 
 if __name__ == "__main__":

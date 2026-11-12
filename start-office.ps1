@@ -1,3 +1,4 @@
+param([switch]$Dev)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $stateDir = Join-Path $taskRoot '.state'
@@ -23,13 +24,15 @@ foreach ($file in @('package.yaml', 'office_actions.py', 'attachment_actions.py'
     Copy-Item -LiteralPath (Join-Path $taskRoot $file) -Destination (Join-Path $packageDir $file) -Force
 }
 $keyFile = Join-Path $stateDir '.api_key'
-if (-not (Test-Path -LiteralPath $keyFile)) {
+if (-not $Dev -and -not (Test-Path -LiteralPath $keyFile)) {
     $randomBytes = New-Object byte[] 32
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($randomBytes) } finally { $rng.Dispose() }
     [IO.File]::WriteAllText($keyFile, [Convert]::ToBase64String($randomBytes), (New-Object Text.UTF8Encoding $false))
 }
 $launcher = Join-Path $taskRoot 'run_server.py'
-$started = Start-Process -FilePath $runtimePython -ArgumentList ('"' + $launcher + '"') -WorkingDirectory $taskRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $stateDir 'server.stdout.log') -RedirectStandardError (Join-Path $stateDir 'server.stderr.log') -PassThru
+$launchArguments = '"' + $launcher + '"'
+if ($Dev) { $launchArguments += ' --dev' }
+$started = Start-Process -FilePath $runtimePython -ArgumentList $launchArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $stateDir 'server.stdout.log') -RedirectStandardError (Join-Path $stateDir 'server.stderr.log') -PassThru
 [IO.File]::WriteAllText($pidFile, [string]$started.Id)
 Write-Output ('Starting Office Action Server; PID ' + $started.Id + '; endpoint http://127.0.0.1:8766/mcp')

@@ -23,9 +23,13 @@ The package exposes Outlook listing, search, message reads, reply drafts, draft 
 
 To stop the server, run `./stop-office.ps1`. To apply source changes, stop and start it. Startup stages the action modules and fixed PowerShell adapters in `.package`, then the official Actions Runtime imports `package.yaml` and builds its RCC environment. `.runtime` contains the pinned runtime host. It does not supply the managed action worker environment.
 
+For local development, stop the server and run `./start-office.ps1 -Dev`. This synchronizes edits to the staged action sources and uses the runtime's `--auto-reload` option. It disables API-key authentication on `127.0.0.1:8766`. Start without `-Dev` to return to authenticated operation.
+
 `outlook_download_attachments` saves attachments into `%LOCALAPPDATA%/OfficeActionServer/attachments` and returns their local paths and SHA256 hashes. Its `pdf_only` option skips inline signature images. It scans at most 500 attachment entries and saves at most 25 files or 50 MiB per call. It never opens or executes downloaded files.
 
 `teams_web_status` uses `from actions import action` and `from robocorp import browser`. It configures installed Edge with `browser_engine="msedge"`, `headless=True`, and `%LOCALAPPDATA%/OfficeActionServer/teams-web-profile` as its persistent context directory. It reports authentication state; web chat reads and sends are not implemented yet. The dedicated profile does not inherit an existing Edge profile's login. Run `teams_web_login.py` in the runtime environment for a coordinated, visible first sign-in. Normal browser windows stay separate.
+
+The sign-in helper stays open until you close its isolated browser windows. Windows account sign-in may complete automatically. A saved login does not guarantee automation access: `access_blocked` with `browser_attachment_denied` means Edge refused the Teams page's DevTools attachment. This restriction was observed on this laptop; its governing setting has not been identified.
 
 Run the offline checks with:
 
