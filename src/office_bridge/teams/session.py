@@ -17,10 +17,9 @@ class SessionError(RuntimeError):
 def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
     if operation not in {
         "teams_web_status",
-        "teams_web_send_group",
-        "teams_web_send_self",
-        "teams_web_read_group",
-        "teams_web_read_self",
+        "teams_web_list_chats",
+        "teams_web_read_chat",
+        "teams_web_send_chat",
         "shutdown",
     }:
         raise SessionError("invalid_operation")

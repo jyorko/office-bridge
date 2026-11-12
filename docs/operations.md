@@ -2,7 +2,7 @@
 
 ## Server lifecycle
 
-Run `./bootstrap.ps1 -Dev` after cloning. It installs prerequisites, configures RCC trust, starts the server, verifies MCP and a Teams self-chat read, and registers Codex. `-PrepareOnly` stops after prerequisite installation. `-SkipCodex` leaves Codex configuration alone. The default without `-Dev` requires a private API key and verifies that unauthenticated MCP requests are refused.
+Run `./bootstrap.ps1 -Dev -TeamsAccount your.name@company.com` after cloning. It installs prerequisites, configures RCC trust, starts the server, verifies MCP and a Teams self-chat read, and registers Codex. The account is saved privately, so later starts can omit the flag. `-PrepareOnly` stops after prerequisite installation. `-SkipCodex` leaves Codex configuration alone. The default without `-Dev` requires a private API key and verifies that unauthenticated MCP requests are refused.
 
 The server binds to `127.0.0.1:8766` and runs hidden under the current Windows account. It is not a Windows service and does not start at logon. After setup, use `powershell/start-office.ps1 -Dev` to enable official auto-reload without an API key. Omit `-Dev` for authenticated operation. `powershell/stop-office.ps1` closes the isolated Teams host and stops only the verified launcher tree. Start refuses an unrelated listener on the port.
 
@@ -12,13 +12,15 @@ Python action changes reload automatically in development. Changes to `src/offic
 
 ## Teams configuration and behavior
 
-The dedicated profile is `%LOCALAPPDATA%/OfficeActionServer/teams-webview2-profile`. Private pinned conversation IDs are in `%LOCALAPPDATA%/OfficeActionServer/config/teams-targets.json`, with `self` and optional `group` keys. First startup migrates an existing `.state/teams-targets.json` or seeds self-chat as `48:notes`. Provision a group ID only after read-only verification of the intended chat. Group actions remain unavailable until the group is pinned. Missing or ambiguous identities fail closed.
+The dedicated profile is `%LOCALAPPDATA%/OfficeActionServer/teams-webview2-profile`. The expected account is saved in `config/settings.json` under that application data directory. There are no hardcoded people or chat names in the action interface.
 
 A fresh Windows installation needs no old WebView2 profile or DLLs. Bootstrap downloads and verifies the SDK, detects or installs the Evergreen Runtime, and the tracked native code creates a new profile using Windows work-account SSO. Bootstrap verifies the exact account before declaring success. Organization sign-in requirements can still require user interaction on a new device; old cookies are not part of the source code.
 
-Background actions cover the specified QA group and self-chat. Reads return bounded, currently loaded history. Sends check the account, pinned conversation, title, and composer, reserve a request ID durably, click once, and observe a settled message. Never automatically retry an uncertain send. Preserve existing drafts when navigating or sending.
+`teams_web_list_chats` returns bounded chat references from the loaded sidebar, optionally filtered by exact name. Pass a `{chat_id, title}` reference to `teams_web_read_chat` or `teams_web_send_chat`. Both verify the exact sidebar row and actual chat header. The same interface handles self chats and groups. Duplicate names have distinct IDs; never choose a recipient from its name alone.
 
-Group confirmation correlates settled message ID, timestamp, exact body, and sender display name. It does not independently verify an immutable sender ID. Group and self sends have previously been observed live. This layout cleanup uses offline and read-only verification to avoid sending duplicate messages.
+Reads return bounded, currently loaded history. Sends check the configured account, conversation ID, title, and composer, reserve a request ID durably, click once, and observe a settled message. Never automatically retry an uncertain send. Preserve existing drafts when navigating or sending.
+
+Send confirmation correlates a settled message ID, timestamp, and exact body after the single controlled click. It does not independently verify an immutable sender ID. Run installation checks without sending messages.
 
 The optional desktop Teams tools use Windows UI Automation. Reading the current chat can work in the background, but navigation that would activate Teams is refused. Do not relax that protection to make a test pass.
 
@@ -33,7 +35,7 @@ The optional desktop Teams tools use Windows UI Automation. Reading the current 
 
 The Teams verifier uses fresh MCP sessions, verifies the exact work account and hidden host, and checks session continuity. It never sends messages. `scripts/bootstrap_check.py` additionally reads the self-chat without recording message contents. `scripts/register_mcp.py` accepts that verification, with `--dev` for development. The separate `scripts/verify_mcp.py` expects authentication and checks Outlook and desktop Teams reads.
 
-`scripts/self_roundtrip.py` is an explicit, manual mutation test. It can send email and Teams messages. Do not use it as a smoke test or rerun a completed send audit. Existing send receipts and audits must remain private.
+Completed send receipts and audits remain private. A cold installation check must not replay a historical send request.
 
 ## Optional diagnostics
 
@@ -47,10 +49,12 @@ Installed Edge previously refused DevTools attachment to the Teams page. No expl
 
 `.state` holds the checkout's credential copy, lifecycle control, runtime history, and verification evidence. `.runtime` is the launcher/development environment. `.package` is generated package input. Pytest, Ruff, and Python caches are disposable. None contains implementation that must be recovered before installing from Git.
 
-The device API key and pinned targets live in `%LOCALAPPDATA%/OfficeActionServer/config`. Startup migrates the old checkout key without rotating it and restores the checkout copy after a reclone. Conflicting keys stop startup without overwriting either key. Development mode does not create or require a key.
+The device API key and configured account live in `%LOCALAPPDATA%/OfficeActionServer/config`. Startup migrates the old checkout key without rotating it and restores the checkout copy after a reclone. Conflicting keys stop startup without overwriting either key. Development mode does not create or require a key.
 
 Downloads, profiles, SDK binaries, and durable send ledgers remain under `%LOCALAPPDATA%/OfficeActionServer`. Attachment downloads are bounded to 25 files/50 MiB per call, with sanitized names, actual saved-byte checks, and SHA256 receipts. Outlook scans are bounded to the newest 500 items.
 
-Bootstrap can recreate software and an empty profile after that directory is removed. It cannot recreate downloaded receipts, historic send ledgers, private group IDs, or a lost API key. Preserve those private records before a reset. An empty install verifies reads only; do not replay old send requests after removing their ledger.
+Bootstrap can recreate software and an empty profile after that directory is removed. It cannot recreate downloaded receipts, historic send ledgers, or a lost API key. Preserve those private records before a reset. An empty install verifies reads only; do not replay old send requests after removing their ledger.
 
-The SDK installer verifies the pinned Microsoft NuGet package and extracted DLL hashes. It does not modify the installed WebView2 Runtime. Runtime versions remain `actions-runtime==1.0.4` and `actions-core==1.0.3`.
+The SDK installer verifies the pinned Microsoft NuGet package and extracted DLL hashes. The bootstrap detects the installed WebView2 Runtime and installs the official Evergreen Runtime only when missing. Runtime versions are `actions-runtime==1.1.0` and `actions-core==1.1.0`. The Windows release executable is pinned to the same version with SHA-256 checks. Work Items is a transitive runtime dependency; Office Bridge does not use it.
+
+Verification uses the Runtime's stateless MCP `2026-07-28` protocol with `server/discover` and per-request routing metadata.

@@ -39,15 +39,6 @@ class ChatHistory(Model):
     truncated: bool
 
 
-class SelfMessageReceipt(Model):
-    recipient_email: str
-    chat_name: Literal["Yorko, Joshua (You)"]
-    status: Literal["observed"]
-    observed_id: str
-    body_digest: str
-    submitted_at: datetime
-
-
 class TeamsWebStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
     state: Literal[
@@ -97,19 +88,6 @@ class TeamsWebStatus(BaseModel):
     ) = None
 
 
-class GroupReceipt(BaseModel):
-    status: Literal["observed", "already_observed"]
-    chat: Literal["QA-ASSIST-VERINT-DEPLOY"]
-    message_id: str
-    time: str
-
-
-class WebSelfReceipt(BaseModel):
-    status: Literal["observed", "already_observed"]
-    chat: Literal["Yorko, Joshua (You)"]
-    message_id: str
-
-
 class WebChatMessage(BaseModel):
     id: str
     text: str
@@ -117,7 +95,29 @@ class WebChatMessage(BaseModel):
     time: str
 
 
+class WebChatRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    chat_id: Annotated[
+        str,
+        Field(pattern=r"^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\.(?:v2|skype))$"),
+    ]
+    title: Annotated[str, Field(min_length=1, max_length=120)]
+
+
+class WebChatSearchResult(BaseModel):
+    items: list[WebChatRef]
+    scope: Literal["currently_loaded_chat_list"]
+    truncated: bool
+
+
+class GroupReceipt(BaseModel):
+    status: Literal["observed", "already_observed"]
+    chat: WebChatRef
+    message_id: str
+    time: str
+
+
 class WebChatHistory(BaseModel):
-    chat: Literal["QA-ASSIST-VERINT-DEPLOY", "Yorko, Joshua (You)"]
+    chat: WebChatRef
     scope: Literal["currently_loaded_history"]
     messages: list[WebChatMessage]

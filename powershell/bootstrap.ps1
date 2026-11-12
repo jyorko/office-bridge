@@ -1,7 +1,8 @@
 param(
     [switch]$Dev,
     [switch]$SkipCodex,
-    [switch]$PrepareOnly
+    [switch]$PrepareOnly,
+    [string]$TeamsAccount
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
@@ -51,6 +52,7 @@ try {
 
     $startScript = Join-Path $PSScriptRoot 'start-office.ps1'
     $startArgs = @{ Dev = [bool]$Dev }
+    if (-not [string]::IsNullOrWhiteSpace($TeamsAccount)) { $startArgs.TeamsAccount = $TeamsAccount }
     & $startScript @startArgs
     if ($LASTEXITCODE -ne 0) { throw 'Office Action Server startup failed.' }
 

@@ -25,4 +25,7 @@ if (-not (Test-Path -LiteralPath $runtimePython)) {
 }
 & $uv.Source --system-certs pip install --python $runtimePython --requirement (Join-Path $taskRoot 'scripts\requirements-dev.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Runtime dependency installation failed.' }
+$exeInstaller = Join-Path $taskRoot 'scripts\install_runtime_exe.py'
+& $runtimePython $exeInstaller
+if ($LASTEXITCODE -ne 0) { throw 'Actions Runtime executable installation failed.' }
 Write-Output 'Pinned Python runtime installed.'

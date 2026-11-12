@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from office_bridge.paths import TEAMS_NATIVE
-from office_bridge.runtime.local_state import config_directory
+from office_bridge.runtime.local_state import configured_account
 
 
 def start(root: Path):
@@ -43,7 +43,7 @@ def start(root: Path):
             generation = secrets.token_hex(16)
             env = os.environ.copy()
             env["OFFICE_TEAMS_SHUTDOWN_TOKEN"] = token
-            env["OFFICE_TEAMS_TARGETS_FILE"] = str(config_directory() / "teams-targets.json")
+            env["OFFICE_TEAMS_EXPECTED_ACCOUNT"] = configured_account()
             env["OFFICE_TEAMS_SCRIPT_FILE"] = str(TEAMS_NATIVE / "chat.js")
             env["OFFICE_TEAMS_HOST_SOURCE"] = str(TEAMS_NATIVE / "TeamsSession.cs")
             try:

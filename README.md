@@ -7,10 +7,12 @@ Local Outlook and Teams actions for Windows, served by the community Actions Run
 Run from a fresh clone on Windows, under your signed-in work account:
 
 ```powershell
-./bootstrap.ps1 -Dev
+./bootstrap.ps1 -Dev -TeamsAccount your.name@company.com
 ```
 
 Bootstrap installs the Python launcher, prepares RCC with Windows certificate trust, installs the verified WebView2 SDK and any missing WebView2 Runtime, starts the background server, verifies Teams through MCP, and registers the endpoint in Codex. It never sends a test message. Classic Outlook must be installed and configured for Outlook actions.
+
+The account is saved in private device configuration. Later starts and reclones can omit `-TeamsAccount`. Setup also installs the checksum-verified Windows Actions Runtime executable in `~/.local/bin`.
 
 `-Dev` enables action auto-reload without an API key on loopback. Omit it for authenticated operation. Use `-PrepareOnly` to install prerequisites without starting, or `-SkipCodex` to skip registration. Start and stop an existing installation with `./powershell/start-office.ps1 -Dev` and `./powershell/stop-office.ps1`.
 
@@ -51,6 +53,8 @@ All WebView2 implementation code is in `src/office_bridge/native/teams/`. Its SD
 
 Omit `--dev` for the authenticated server. `scripts/bootstrap_check.py --dev` verifies MCP discovery, the hidden Teams session, and a self-chat read. `scripts/verify_mcp.py` also checks authenticated Outlook and desktop Teams reads. Registration preserves unrelated Codex configuration.
 
-Sending always requires explicit user authorization. Unknown send outcomes are never automatically retried. Verification does not send messages. See [operations](docs/operations.md) for the separately authorized manual send test, profile configuration, and diagnostics.
+Teams exposes general chat list, read, and send actions. Choose a `{chat_id, title}` reference from the chat list; reads and sends verify it against the actual chat header. The same actions handle self chats and group chats.
+
+Sending always requires explicit user authorization. Unknown send outcomes are never automatically retried. Verification does not send messages. See [operations](docs/operations.md) for configuration and diagnostics.
 
 See [architecture](docs/architecture.md) for package boundaries and persistent-session ownership.

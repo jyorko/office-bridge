@@ -34,7 +34,7 @@ public sealed class TeamsSession : ApplicationContext
     static readonly JavaScriptSerializer Json =
         new JavaScriptSerializer { MaxJsonLength = MaxFrame };
     readonly Form host = new Form();
-    readonly string sdk, profile, pipeName, generation;
+    readonly string sdk, profile, pipeName, generation, expectedAccount;
     readonly int parentId;
     readonly CancellationTokenSource stop = new CancellationTokenSource();
     CoreWebView2Environment environment;
@@ -43,16 +43,17 @@ public sealed class TeamsSession : ApplicationContext
     System.Windows.Forms.Timer foregroundTimer;
     bool initializing, interference;
     string error = "loading";
+    string currentAccountName;
     string groupScript;
     string scriptPath, nativePath, scriptDigest, nativeDigest;
-    Dictionary<string, object> targets;
 
     const string Surface = @"(() => {
       const dialog=document.querySelector('[data-tid=me-control-menu-dialog]');
       const menu=dialog && dialog.querySelector('[data-tid=me-control-menu]');
       const emails=menu ? Array.from(new Set((menu.innerText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)||[]).map(e=>e.toLowerCase()))) : [];
-      const verified=!!dialog && dialog.getAttribute('role')==='dialog' && dialog.getAttribute('aria-label')==='Profile menu' && !!menu && menu.getAttribute('role')==='menu' && !!dialog.querySelector('[data-tid=me-control-sign-out-button]') && emails.length===1 && emails[0]==='joshua.yorko@gainwelltechnologies.com';
-      return {hostname:location.hostname,path:location.pathname,app:!!document.querySelector('[data-tid=experience-layout]') && !!document.querySelector('[data-tid=me-control-avatar-trigger]'),login:!!document.querySelector('input[type=email],input[name=loginfmt],input[type=password]'),blocked:!!document.querySelector('[data-tid=unauthorized-page],[data-tid=error-page]'),account_verified:verified};
+      const name=menu && menu.querySelector('[data-tid=me-control-display-name]')?.textContent.trim() || '';
+      const verified=!!dialog && dialog.getAttribute('role')==='dialog' && dialog.getAttribute('aria-label')==='Profile menu' && !!menu && menu.getAttribute('role')==='menu' && !!dialog.querySelector('[data-tid=me-control-sign-out-button]') && emails.length===1 && emails[0]===__EXPECTED_ACCOUNT__;
+      return {hostname:location.hostname,path:location.pathname,app:!!document.querySelector('[data-tid=experience-layout]') && !!document.querySelector('[data-tid=me-control-avatar-trigger]'),login:!!document.querySelector('input[type=email],input[name=loginfmt],input[type=password]'),blocked:!!document.querySelector('[data-tid=unauthorized-page],[data-tid=error-page]'),account_verified:verified,account_name:name};
     })()";
 
     TeamsSession(string sdkPath, string profilePath, string pipe, string gen, int parent)
@@ -62,6 +63,9 @@ public sealed class TeamsSession : ApplicationContext
         pipeName = pipe;
         generation = gen;
         parentId = parent;
+        expectedAccount = (Environment.GetEnvironmentVariable("OFFICE_TEAMS_EXPECTED_ACCOUNT") ?? "")
+                              .Trim()
+                              .ToLowerInvariant();
         host.ShowInTaskbar = false;
         host.ClientSize = new Size(1200, 900);
         var handle = host.Handle;
@@ -119,14 +123,13 @@ public sealed class TeamsSession : ApplicationContext
             };
             scriptPath = Environment.GetEnvironmentVariable("OFFICE_TEAMS_SCRIPT_FILE");
             nativePath = Environment.GetEnvironmentVariable("OFFICE_TEAMS_HOST_SOURCE");
-            string targetsPath = Environment.GetEnvironmentVariable("OFFICE_TEAMS_TARGETS_FILE");
             if (!String.IsNullOrEmpty(scriptPath) && File.Exists(scriptPath))
                 groupScript = File.ReadAllText(scriptPath);
             scriptDigest = FileDigest(scriptPath);
             nativeDigest = FileDigest(nativePath);
-            if (!String.IsNullOrEmpty(targetsPath) && File.Exists(targetsPath))
-                targets =
-                    Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(targetsPath));
+            if (String.IsNullOrEmpty(expectedAccount) ||
+                !Regex.IsMatch(expectedAccount, "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"))
+                throw new InvalidOperationException("expected_account_unconfigured");
             core.Navigate("https://teams.cloud.microsoft/");
             error = "loading";
         }
@@ -160,7 +163,8 @@ public sealed class TeamsSession : ApplicationContext
     }
     async Task<Dictionary<string, object>> Inspect()
     {
-        string raw = await controller.CoreWebView2.ExecuteScriptAsync(Surface);
+        string surface = Surface.Replace("__EXPECTED_ACCOUNT__", Json.Serialize(expectedAccount));
+        string raw = await controller.CoreWebView2.ExecuteScriptAsync(surface);
         return Json.Deserialize<Dictionary<string, object>>(raw);
     }
     static bool Flag(Dictionary<string, object> value, string name)
@@ -198,7 +202,9 @@ public sealed class TeamsSession : ApplicationContext
                     "document.querySelector('[data-tid=me-control-avatar-trigger]')?.click(); " +
                     "})()");
                 page = await Inspect();
-                account = Flag(page, "account_verified");
+                string profileName = Convert.ToString(page["account_name"]);
+                account = Flag(page, "account_verified") && !String.IsNullOrWhiteSpace(profileName);
+                if (account) currentAccountName = profileName;
                 await controller.CoreWebView2.ExecuteScriptAsync(
                     "(() => { if(document.querySelector('[data-tid=me-control-menu-dialog]')) " +
                     "document.querySelector('[data-tid=me-control-avatar-trigger]')?.click(); " +
@@ -268,8 +274,8 @@ public sealed class TeamsSession : ApplicationContext
                 throw new InvalidDataException();
             return new Dictionary<string, object> { { "shutdown", true } };
         }
-        if (op == "teams_web_send_group" || op == "teams_web_send_self" ||
-            op == "teams_web_read_group" || op == "teams_web_read_self")
+        if (op == "teams_web_list_chats" || op == "teams_web_read_chat" ||
+            op == "teams_web_send_chat")
         {
             object raw;
             if (!request.TryGetValue("arguments", out raw))
@@ -277,30 +283,94 @@ public sealed class TeamsSession : ApplicationContext
             var args = raw as Dictionary<string, object>;
             if (args == null)
                 throw new InvalidDataException();
-            if (op == "teams_web_read_group" || op == "teams_web_read_self")
-                return await Read(op, args);
-            return await Send(op, args);
+            if (op == "teams_web_list_chats")
+                return await ListChats(args);
+            if (op == "teams_web_read_chat")
+                return await Read(args);
+            return await Send(args);
         }
         throw new InvalidDataException();
     }
-    async Task<Dictionary<string, object>> Read(string operation, Dictionary<string, object> args)
+    async Task<Dictionary<string, object>> ListChats(Dictionary<string, object> args)
     {
-        string key = operation == "teams_web_read_self" ? "self" : "group",
-               title = key == "self" ? "Yorko, Joshua (You)" : "QA-ASSIST-VERINT-DEPLOY";
-        object targetValue, limitValue;
-        if (targets == null || !targets.TryGetValue(key, out targetValue) ||
-            String.IsNullOrEmpty(groupScript) || !args.TryGetValue("limit", out limitValue))
+        object rawLimit, rawName;
+        if (String.IsNullOrEmpty(groupScript) || !args.TryGetValue("limit", out rawLimit))
             throw new InvalidDataException();
-        string chatId = targetValue as string;
-        int limit = Convert.ToInt32(limitValue);
-        if (limit < 1 || limit > 50 || String.IsNullOrEmpty(chatId) ||
-            (key == "self" ? chatId != "48:notes"
-                           : !Regex.IsMatch(chatId, "^19:[0-9a-f]{32}@thread\\.v2$")))
+        int limit = Convert.ToInt32(rawLimit);
+        string name = args.TryGetValue("name", out rawName) ? rawName as string : null;
+        if (limit < 1 || limit > 100 || (rawName != null && name == null) ||
+            (name != null && (name.Length < 1 || name.Length > 120)))
             throw new InvalidDataException();
         var current = await Status();
         if (Convert.ToString(current["state"]) != "authenticated" || interference)
             throw new InvalidOperationException();
-        string phase = "locate";
+        string navigationId = Guid.NewGuid().ToString("N");
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (host.Visible || OwnedForeground())
+            {
+                interference = true;
+                throw new InvalidOperationException();
+            }
+            var request = new Dictionary<string, object> {
+                { "phase", "list" }, { "name", name }, { "limit", limit },
+                { "navigationId", navigationId }
+            };
+            var result = Json.Deserialize<Dictionary<string, object>>(
+                await controller.CoreWebView2.ExecuteScriptAsync("(" + groupScript + ")(" +
+                    Json.Serialize(request) + ")"));
+            string state = Convert.ToString(result["state"]);
+            if (state == "listed")
+            {
+                var items = result["items"] as object[];
+                if (items == null || items.Length > limit)
+                    throw new InvalidOperationException();
+                foreach (var item in items)
+                {
+                    var refValue = item as Dictionary<string, object>;
+                    if (refValue == null || !refValue.ContainsKey("chat_id") ||
+                        !refValue.ContainsKey("title") ||
+                        !ValidChatId(Convert.ToString(refValue["chat_id"])) ||
+                        String.IsNullOrWhiteSpace(Convert.ToString(refValue["title"])) ||
+                        Convert.ToString(refValue["title"]).Length > 120 ||
+                        (name != null && Convert.ToString(refValue["title"]) != name))
+                        throw new InvalidOperationException();
+                }
+                current = await Status();
+                if (Convert.ToString(current["state"]) != "authenticated")
+                    throw new InvalidOperationException();
+                return result;
+            }
+            if (state != "waiting")
+                throw new InvalidOperationException(state);
+            await Task.Delay(150);
+        }
+        throw new TimeoutException();
+    }
+    static bool ValidChatId(string chatId)
+    {
+        return chatId == "48:notes" || Regex.IsMatch(
+            chatId ?? "", "^19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype)$");
+    }
+    async Task<Dictionary<string, object>> Read(Dictionary<string, object> args)
+    {
+        object chatValue, limitValue;
+        if (!args.TryGetValue("chat", out chatValue) ||
+            !args.TryGetValue("limit", out limitValue) || String.IsNullOrEmpty(groupScript))
+            throw new InvalidDataException();
+        var chat = chatValue as Dictionary<string, object>;
+        if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
+            throw new InvalidDataException();
+        string chatId = Convert.ToString(chat["chat_id"]), title = Convert.ToString(chat["title"]);
+        int limit = Convert.ToInt32(limitValue);
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
+            limit < 1 || limit > 50)
+            throw new InvalidDataException();
+        var current = await Status();
+        if (Convert.ToString(current["state"]) != "authenticated" || interference)
+            throw new InvalidOperationException();
+        string phase = "locate", navigationId = Guid.NewGuid().ToString("N");
         var deadline = DateTime.UtcNow.AddSeconds(25);
         while (DateTime.UtcNow < deadline)
         {
@@ -309,49 +379,49 @@ public sealed class TeamsSession : ApplicationContext
                 interference = true;
                 throw new InvalidOperationException();
             }
-            string js = "(" + groupScript + ")(" + Json.Serialize(phase) + "," +
-                        Json.Serialize(limit) + "," + Json.Serialize(chatId) + "," +
-                        Json.Serialize(title) + ",null)";
+            var request = new Dictionary<string, object> {
+                { "phase", phase }, { "chatId", chatId }, { "title", title },
+                { "limit", limit }, { "navigationId", navigationId }
+            };
             var result = Json.Deserialize<Dictionary<string, object>>(
-                await controller.CoreWebView2.ExecuteScriptAsync(js));
+                await controller.CoreWebView2.ExecuteScriptAsync("(" + groupScript + ")(" +
+                    Json.Serialize(request) + ")"));
             string state = Convert.ToString(result["state"]);
             if (state == "read")
             {
+                if (Convert.ToString(result["chat_id"]) != chatId ||
+                    Convert.ToString(result["title"]) != title)
+                    throw new InvalidOperationException();
                 current = await Status();
                 if (Convert.ToString(current["state"]) != "authenticated")
                     throw new InvalidOperationException();
                 return result;
             }
-            if (state == "ready" || state == "navigated")
-                phase = "read";
-            else if (state == "navigate")
-                phase = "navigate";
-            else if (state != "waiting")
-                throw new InvalidOperationException(state);
+            if (state == "ready" || state == "navigated") phase = "read";
+            else if (state == "navigate") phase = "navigate";
+            else if (state != "waiting") throw new InvalidOperationException(state);
             await Task.Delay(150);
         }
         throw new TimeoutException();
     }
-    async Task<Dictionary<string, object>> Send(string operation, Dictionary<string, object> args)
+    async Task<Dictionary<string, object>> Send(Dictionary<string, object> args)
     {
-        object bodyValue, requestValue, targetValue;
-        string key = operation == "teams_web_send_self" ? "self" : "group";
-        string title = key == "self" ? "Yorko, Joshua (You)" : "QA-ASSIST-VERINT-DEPLOY";
-        if (!args.TryGetValue("body", out bodyValue) ||
-            !args.TryGetValue("request_id", out requestValue) || targets == null ||
-            !targets.TryGetValue(key, out targetValue) || String.IsNullOrEmpty(groupScript))
+        object chatValue, bodyValue, requestValue;
+        if (!args.TryGetValue("chat", out chatValue) || !args.TryGetValue("body", out bodyValue) ||
+            !args.TryGetValue("request_id", out requestValue) || String.IsNullOrEmpty(groupScript))
             throw new InvalidDataException();
-        string body = bodyValue as string, requestId = requestValue as string,
-               chatId = targetValue as string;
-        if (String.IsNullOrEmpty(body) || body.Length > 2000 || String.IsNullOrEmpty(requestId) ||
-            !Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$") || String.IsNullOrEmpty(chatId))
+        var chat = chatValue as Dictionary<string, object>;
+        if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
             throw new InvalidDataException();
-        if (key == "self" ? chatId != "48:notes"
-                          : !Regex.IsMatch(chatId, "^19:[0-9a-f]{32}@thread\\.v2$"))
+        string chatId = Convert.ToString(chat["chat_id"]), title = Convert.ToString(chat["title"]),
+               body = bodyValue as string, requestId = requestValue as string;
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
+            String.IsNullOrEmpty(body) || body.Length > 2000 || String.IsNullOrEmpty(requestId) ||
+            !Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$"))
             throw new InvalidDataException();
         var current = await Status();
         if (Convert.ToString(current["state"]) != "authenticated" || interference ||
-            Flag(current, "restart_required"))
+            Flag(current, "restart_required") || String.IsNullOrWhiteSpace(currentAccountName))
             throw new InvalidOperationException();
         string claims = Path.Combine(Path.GetDirectoryName(profile), "teams-web-sends", "claims");
         Directory.CreateDirectory(claims);
@@ -364,13 +434,13 @@ public sealed class TeamsSession : ApplicationContext
             bodyDigest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(body)))
                              .Replace("-", "")
                              .ToLowerInvariant();
-            targetDigest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(chatId)))
+            targetDigest = BitConverter.ToString(
+                               sha.ComputeHash(Encoding.UTF8.GetBytes(chatId + "\0" + title)))
                                .Replace("-", "")
                                .ToLowerInvariant();
         }
         string claim = Path.Combine(claims, digest + ".json");
-        using (var file =
-                   new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        using (var file = new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None))
         {
             byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(
                 new Dictionary<string, object> { { "body_sha256", bodyDigest },
@@ -378,7 +448,8 @@ public sealed class TeamsSession : ApplicationContext
             file.Write(bytes, 0, bytes.Length);
             file.Flush(true);
         }
-        string phase = "navigate";
+        string phase = "navigate", navigationId = Guid.NewGuid().ToString("N");
+        string authorName = currentAccountName;
         var deadline = DateTime.UtcNow.AddSeconds(35);
         while (DateTime.UtcNow < deadline)
         {
@@ -387,38 +458,42 @@ public sealed class TeamsSession : ApplicationContext
                 interference = true;
                 throw new InvalidOperationException();
             }
-            if (phase == "prepare" || phase == "send")
+            if (phase == "prepare" || phase == "send" || phase == "observe")
             {
                 current = await Status();
                 if (Convert.ToString(current["state"]) != "authenticated" ||
-                    Flag(current, "restart_required"))
+                    Flag(current, "restart_required") ||
+                    currentAccountName != authorName)
                     throw new InvalidOperationException();
             }
-            string js = "(" + groupScript + ")(" + Json.Serialize(phase) + "," +
-                        Json.Serialize(body) + "," + Json.Serialize(chatId) + "," +
-                        Json.Serialize(title) + "," + Json.Serialize(requestId) + ")";
+            var request = new Dictionary<string, object> {
+                { "phase", phase }, { "body", body }, { "chatId", chatId },
+                { "title", title }, { "requestId", requestId }, { "authorName", authorName },
+                { "navigationId", navigationId }
+            };
             var result = Json.Deserialize<Dictionary<string, object>>(
-                await controller.CoreWebView2.ExecuteScriptAsync(js));
+                await controller.CoreWebView2.ExecuteScriptAsync("(" + groupScript + ")( " +
+                    Json.Serialize(request) + ")"));
             string state = Convert.ToString(result["state"]);
-            if (state == "navigated")
-                phase = "prepare";
+            if (state == "navigated") phase = "prepare";
             else if (state == "prepared")
             {
                 await controller.CoreWebView2.CallDevToolsProtocolMethodAsync(
-                    "Input.insertText",
-                    Json.Serialize(new Dictionary<string, object> { { "text", body } }));
+                    "Input.insertText", Json.Serialize(new Dictionary<string, object> { { "text", body } }));
                 phase = "send";
             }
-            else if (state == "clicked")
-                phase = "observe";
+            else if (state == "clicked") phase = "observe";
             else if (state == "observed")
             {
+                if (Convert.ToString(result["chat_id"]) != chatId ||
+                    Convert.ToString(result["title"]) != title)
+                    throw new InvalidOperationException();
                 current = await Status();
-                if (Convert.ToString(current["state"]) != "authenticated")
+                if (Convert.ToString(current["state"]) != "authenticated" ||
+                    currentAccountName != authorName)
                     throw new InvalidOperationException();
                 string receipt = claim + ".receipt";
-                using (var file = new FileStream(receipt, FileMode.CreateNew, FileAccess.Write,
-                                                 FileShare.None))
+                using (var file = new FileStream(receipt, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
                     byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(result));
                     file.Write(bytes, 0, bytes.Length);
@@ -426,8 +501,7 @@ public sealed class TeamsSession : ApplicationContext
                 }
                 return result;
             }
-            else if (state != "waiting")
-                throw new InvalidOperationException(state);
+            else if (state != "waiting") throw new InvalidOperationException(state);
             await Task.Delay(150);
         }
         throw new TimeoutException();

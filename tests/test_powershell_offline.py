@@ -63,17 +63,15 @@ Assert-Failure {Digest $draft} 'stale_draft'
 $ns.Accounts=@([pscustomobject]@{SmtpAddress='other@example.test';DeliveryStore=[pscustomobject]@{StoreID='store-A'}})
 if((Digest $draft) -ceq $digest){throw 'Fallback account identity change undetected'}
 if((Chat-Name 'Chat Briggs, Gary Out of office Last message text') -cne 'Briggs, Gary'){throw 'DM normalization failed'}
-if((Chat-Name 'Group chat QA-ASSIST-VERINT-DEPLOY Has pinned messages Last message text') -cne 'QA-ASSIST-VERINT-DEPLOY'){throw 'Group normalization failed'}
+if((Chat-Name 'Group chat Design Review Has pinned messages Last message text') -cne 'Design Review'){throw 'Group normalization failed'}
 if($null -ne (Chat-Name 'Favorites')){throw 'Category accepted as chat'}
 if((Chat-Name 'Chat Person In a meeting Last message text') -cne 'Person'){throw 'Meeting presence normalization failed'}
-if((Chat-Name 'Chat Yorko, Joshua (You) You: synthetic') -cne 'Yorko, Joshua (You)'){throw 'Self chat without Last message rejected'}
-Assert-SelfAccount 'joshua.yorko@gainwelltechnologies.com' 'joshua.yorko@gainwelltechnologies.com'
-Assert-Failure {Assert-SelfAccount 'joshua.yorko@gainwelltechnologies.com' 'other@example.test'} 'self_identity_unverified'
-Assert-Failure {Assert-SelfAccount 'other@example.test' 'other@example.test'} 'self_identity_unverified'
-$selfWindow=[pscustomobject]@{Current=[pscustomobject]@{Name='Chat | Yorko, Joshua (You) | Gainwell Technologies | joshua.yorko@gainwelltechnologies.com | Microsoft Teams'}}
-Assert-SelfWindow $selfWindow
-$selfWindow.Current.Name='Chat | Other Person | Gainwell Technologies | joshua.yorko@gainwelltechnologies.com | Microsoft Teams'
-Assert-Failure {Assert-SelfWindow $selfWindow} 'self_identity_unverified'
+$env:OFFICE_BRIDGE_ACCOUNT='user@example.test'
+Assert-ConfiguredAccount 'user@example.test' 'user@example.test'
+Assert-Failure {Assert-ConfiguredAccount 'user@example.test' 'other@example.test'} 'self_identity_unverified'
+Assert-Failure {Assert-ConfiguredAccount 'other@example.test' 'other@example.test'} 'self_identity_unverified'
+Remove-Item Env:\OFFICE_BRIDGE_ACCOUNT
+Assert-Failure {Assert-ConfiguredAccount 'user@example.test' 'user@example.test'} 'self_identity_unverified'
 Assert-NotEditing 123 999 $true
 Assert-NotEditing 123 123 $false
 Assert-Failure {Assert-NotEditing 123 123 $true} 'desktop_busy'
@@ -97,8 +95,6 @@ Assert-Failure {Get-Teams} 'app_not_ready';if($script:launched){throw 'Running m
 $script:fakeProcesses=@();[void](Get-Teams);if(-not $script:launched){throw 'Absent Teams did not launch'}
 $script:fakeWindows=@([pscustomobject]@{},[pscustomobject]@{})
 Assert-Failure {Get-Teams} 'ambiguous_chat'
-$selfWindow.Current.Name='Chat | Yorko, Joshua (You) | Gainwell Technologies | other@example.test | Microsoft Teams'
-Assert-Failure {Assert-SelfWindow $selfWindow} 'self_identity_unverified'
 # UIA exposes structural nodes with null AutomationId; they must be skipped.
 function Elements($window){return @(
  [pscustomobject]@{Current=[pscustomobject]@{AutomationId=$null;Name='container'}},

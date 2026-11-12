@@ -1,0 +1,39 @@
+# Office Bridge agent instructions
+
+## Scope and tools
+
+- Use the community `actions-runtime` and `actions-core` packages from `joshyorko/actions`. Do not replace the official server with a custom MCP or HTTP server.
+- All subagents must use LUNA unless the user explicitly authorizes another model.
+- Read the relevant RCC Action Server skill before changing package or runtime integration.
+- Use `from actions import action` and `from robocorp import browser` for browser actions. Let `robocorp-browser` resolve its compatible Playwright dependency.
+- Work Items is a runtime dependency. Office Bridge does not use Work Items workflows or storage.
+
+## Setup and ownership
+
+- Fresh clone: `./bootstrap.ps1 -Dev -TeamsAccount your.name@company.com`. The account is saved privately. Omit `-Dev` for authentication. `-PrepareOnly` installs prerequisites without startup; `-SkipCodex` skips client registration.
+- Root `bootstrap.ps1` is the entry point. PowerShell lifecycle scripts belong in `powershell/`; Python lifecycle and verification scripts belong in `scripts/`.
+- Implementation belongs in `src/`, including native PowerShell, C#, and JavaScript. Never leave required implementation only in ignored state or installed environments.
+- Start: `./powershell/start-office.ps1 -Dev`. Stop: `./powershell/stop-office.ps1`. Inspect the recorded process and listener before changing an existing server. Do not launch duplicate servers or silently rotate keys.
+- The server runs hidden in the signed-in Windows user session at `http://127.0.0.1:8766/`. MCP is `/mcp`, and the full API schema is `/openapi.json`. Codex registration connects to it; it does not start the process.
+- Disposable Actions Runtime workers connect to the launcher-owned persistent Teams host. Worker replacement must not replace the browser or replay a request.
+
+## Private data and desktop protection
+
+- `.runtime`, `.package`, `.state`, Python caches, profiles, credentials, mail/chat data, downloads, logs, databases, and binaries must stay out of Git.
+- Device data lives under `%LOCALAPPDATA%/OfficeActionServer`: `config` holds the key and expected account, `teams-webview2-profile` holds the isolated session, `webview2-sdk` holds verified DLLs, and `teams-web-sends` holds durable send records.
+- Bootstrap must work without previous generated folders or browser data. Use Windows work-account SSO and verify the exact account; never extract tokens or copy the user's normal Chrome/Edge profile.
+- Keep certificate verification enabled. Configure Windows roots in the actual application RCC home before building workers. Preserve other profile settings and explicit `ACTIONS_HOME` overrides.
+- Never take the user's keyboard, clipboard, desktop focus, normal browser, or Teams window. Use the hidden WebView2 controller or an explicitly selected isolated browser.
+- Preserve existing composers and verify the exact chat ID and title before reading or sending. Missing or ambiguous identities must stop the action.
+- Use the general Teams list/read/send actions with `{chat_id, title}` references. Do not add per-person, per-group, or self-specific action functions or wire operations. Account names and email addresses belong in private configuration, not implementation constants.
+- Sending needs explicit user authorization. Reserve requests durably, click once, and verify a new settled message. An uncertain send must never be retried automatically.
+- Keep receipts, credentials, and send ledgers recoverable during a reset. Test from empty state before restoring private records. Never use a send test as an installation check.
+
+## Verification and publication
+
+- Run `./.runtime/Scripts/python.exe -m pytest`, `./.runtime/Scripts/ruff.exe check src scripts tests`, and the formatter check for changed Python.
+- Use `scripts/bootstrap_check.py --dev` for read-only MCP discovery, exact Teams identity, hidden-host checks, and self-chat read. `scripts/verify_teams_web.py --dev --count 2` checks continuity across managed workers.
+- Never replay a historical send test or use a send as a bootstrap check. Inspect existing send history before any separately authorized send test.
+- Rebuild the SDK with its pinned package and DLL hash checks. Do not commit downloaded artifacts. Update `docs/api/openapi.json` with `scripts/export_openapi.py` when the API changes.
+- Inspect the staged diff and scan for private data before committing or pushing. Keep documentation aligned with actual lifecycle paths and installed versions.
+- Report reproducible Action Server bugs upstream to `https://github.com/joshyorko/actions/issues` with sanitized steps, versions, expected/actual behavior, and relevant logs. The user authorizes these reports. Resolve package configuration and local integration mistakes here; never publish credentials, corporate messages, receipts, or private identifiers in a report.

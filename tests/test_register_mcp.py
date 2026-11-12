@@ -16,7 +16,7 @@ def verified_install(tmp_path, monkeypatch):
         "verified": True,
         "dev": True,
         "mcp_url": "http://127.0.0.1:8766/mcp",
-        "checks": ["teams_web_read_self_chat"],
+        "checks": ["teams_web_read_chat"],
     }
     (state / "bootstrap-verification.json").write_text(json.dumps(evidence))
     config = tmp_path / "codex/config.toml"

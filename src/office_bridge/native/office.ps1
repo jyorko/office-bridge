@@ -1,7 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile,[Parameter(Mandatory=$true)][string]$ResultFile)
 $ErrorActionPreference='Stop'
 $utf8=New-Object System.Text.UTF8Encoding($false)
-$owned=$false; $mutex=$null; $app=$null; $ns=$null; $mutationStarted=$false; $sendInvoked=$false
+$owned=$false; $mutex=$null; $app=$null; $ns=$null; $mutationStarted=$false
 function Fail([string]$code){throw [System.InvalidOperationException]::new($code)}
 function Stamp($date){([datetime]$date).ToUniversalTime().ToString('o')}
 function Hash([string]$value){$sha=[Security.Cryptography.SHA256]::Create();try{([BitConverter]::ToString($sha.ComputeHash($utf8.GetBytes($value)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
@@ -85,7 +85,6 @@ function Assert-DesktopIdle($window){
 }
 function Elements($window){return @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition))}
 function Chat-Name([string]$label){
- if($label -cmatch '^Chat Yorko, Joshua \(You\)( |$)'){return 'Yorko, Joshua (You)'}
  if($label -notmatch '^(Chat|Meeting chat|Group chat) ' -or $label -notmatch ' Has pinned messages| Last message'){return $null}
  $name=($label -split ' Has pinned messages| Last message')[0] -replace '^(Chat|Meeting chat|Group chat) ',''
  if($label.StartsWith('Chat ',[StringComparison]::Ordinal)){$name=$name -replace ' (Available|Busy|Do not disturb|Be right back|Away|Offline|Out of office|In a call|In a meeting|Presenting)$',''}
@@ -94,22 +93,20 @@ function Chat-Name([string]$label){
 function Chat-Elements($window){return @(Elements $window | Where-Object {$_.Current.ControlType.ProgrammaticName -eq 'ControlType.TreeItem' -and (Chat-Name ([string]$_.Current.Name))})}
 function Chat-Key($window,[string]$label){Hash ("$($window.Current.NativeWindowHandle)`n$label")}
 function Bodies($window){return @(Elements $window | Where-Object {([string]$_.Current.AutomationId).StartsWith('message-body-',[StringComparison]::Ordinal)} | ForEach-Object {@{observed_id=[string]$_.Current.AutomationId;text=[string]$_.Current.Name}})}
-function Assert-SelfWindow($window){
- if($window.Current.Name -cne 'Chat | Yorko, Joshua (You) | Gainwell Technologies | joshua.yorko@gainwelltechnologies.com | Microsoft Teams'){Fail 'self_identity_unverified'}
-}
-function Assert-SelfAccount([string]$identity,[string]$recipient){
- if($identity -ine 'joshua.yorko@gainwelltechnologies.com' -or $recipient -ine $identity){Fail 'self_identity_unverified'}
+function Assert-ConfiguredAccount([string]$identity,[string]$recipient){
+ $configured=[string]$env:OFFICE_BRIDGE_ACCOUNT
+ if($configured -notmatch '^[^@\s]+@[^@\s]+$' -or $identity -ine $configured -or $recipient -ine $identity){Fail 'self_identity_unverified'}
 }
 try{
  $request=[IO.File]::ReadAllText($RequestFile,$utf8) | ConvertFrom-Json
  if($request.version -ne 1){Fail 'invalid_input'}
  $a=$request.arguments; $op=[string]$request.operation
- $allowed=@('inbox_list','get_message','search_inbox','create_reply_draft','create_mail_draft','send_draft','archive','list_chats','read_chat','send_self_message')
+ $allowed=@('inbox_list','get_message','search_inbox','create_reply_draft','create_mail_draft','send_draft','archive','list_chats','read_chat')
  if($op -notin $allowed){Fail 'invalid_input'}
  $mutex=New-Object Threading.Mutex($false,'Local\CodexOfficeAutomationDesktop')
  try{$owned=$mutex.WaitOne(5000)}catch [Threading.AbandonedMutexException]{$owned=$true}
  if(-not $owned){Fail 'desktop_busy'}
- if($op -in @('list_chats','read_chat','send_self_message')){Add-Type -AssemblyName UIAutomationClient;Add-Type -AssemblyName UIAutomationTypes}else{
+ if($op -in @('list_chats','read_chat')){Add-Type -AssemblyName UIAutomationClient;Add-Type -AssemblyName UIAutomationTypes}else{
   try{$app=New-Object -ComObject Outlook.Application;$ns=$app.GetNamespace('MAPI')}catch{Fail 'app_unavailable'}
  }
  if($a.PSObject.Properties.Name -contains 'limit'){if([int]$a.limit -lt 1 -or [int]$a.limit -gt 50){Fail 'invalid_input'}}
@@ -147,7 +144,7 @@ try{
   'create_mail_draft' {
    if(-not $a.body_text -or $a.body_text.Length -gt 20000 -or -not $a.subject -or $a.subject.Length -gt 250 -or $a.subject -match '[\r\n]'){Fail 'invalid_input'}
    $identity=(Address $ns.CurrentUser.AddressEntry ([string]$ns.CurrentUser.Name)).smtp_address
-   Assert-SelfAccount $identity ([string]$a.recipient_email)
+   Assert-ConfiguredAccount $identity ([string]$a.recipient_email)
    $accounts=@($ns.Accounts | Where-Object {$_.SmtpAddress -ieq $identity})
    if($accounts.Count -ne 1){Fail 'self_identity_unverified'}
    $mutationStarted=$true;$mail=$app.CreateItem(0)
@@ -211,52 +208,12 @@ try{
    foreach($message in @($messages | Select-Object -Last ([int]$a.limit))){$remaining=80000-$chars;if($remaining -le 0){$truncated=$true;break};if($message.text.Length -gt $remaining){$message.text=$message.text.Substring(0,$remaining);$truncated=$true};$chars+=$message.text.Length;$rows+=,$message}
    $result=@{chat=$a.chat;messages=$rows;scope='currently_loaded_history';captured_at=(Stamp (Get-Date));truncated=$truncated}
   }
-  'send_self_message' {
-   if(-not $a.body_text -or $a.body_text.Length -gt 2000 -or [string]::IsNullOrWhiteSpace($a.body_text)){Fail 'invalid_input'}
-   $window=Get-Teams
-   if(-not $window.Current.Name.EndsWith(' | Gainwell Technologies | joshua.yorko@gainwelltechnologies.com | Microsoft Teams',[StringComparison]::Ordinal)){Fail 'self_identity_unverified'}
-   $selfChats=@(Chat-Elements $window | Where-Object {(Chat-Name ([string]$_.Current.Name)) -ceq 'Yorko, Joshua (You)'})
-   if($selfChats.Count -ne 1){Fail 'ambiguous_chat'}
-   $selection=[System.Windows.Automation.SelectionItemPattern]$selfChats[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-   Assert-DesktopIdle $window;$foregroundBefore=Foreground-Handle
-   $already=$window.Current.Name -ceq 'Chat | Yorko, Joshua (You) | Gainwell Technologies | joshua.yorko@gainwelltechnologies.com | Microsoft Teams'
-   Assert-NavigationAllowed ([long]$window.Current.NativeWindowHandle) $foregroundBefore $already
-   if(-not $already){$selection.Select();if((Foreground-Handle) -ne $foregroundBefore){Fail 'desktop_busy'}}
-   $settled=$false
-   for($i=0;$i -lt 30;$i++){
-    Start-Sleep -Milliseconds 200;$window=Get-Teams
-    if($window.Current.Name -ceq 'Chat | Yorko, Joshua (You) | Gainwell Technologies | joshua.yorko@gainwelltechnologies.com | Microsoft Teams' -and $selection.Current.IsSelected){$settled=$true;break}
-   }
-   if(-not $settled){Fail 'self_identity_unverified'}
-   Start-Sleep -Milliseconds 400;Assert-SelfWindow (Get-Teams)
-   $beforeIds=@(Bodies $window | ForEach-Object {$_.observed_id})
-   $composers=@(Elements $window | Where-Object {$_.Current.ControlType.ProgrammaticName -eq 'ControlType.Edit' -and $_.Current.Name -ceq 'Type a message' -and ([string]$_.Current.AutomationId).StartsWith('new-message-',[StringComparison]::Ordinal)})
-   if($composers.Count -ne 1){Fail 'composer_unavailable'}
-   $value=[System.Windows.Automation.ValuePattern]$composers[0].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-   if($value.Current.IsReadOnly -or -not [string]::IsNullOrEmpty($value.Current.Value)){Fail 'composer_not_empty'}
-   $window=Get-Teams;Assert-SelfWindow $window;Assert-DesktopIdle $window;$mutationStarted=$true;$value.SetValue([string]$a.body_text)
-   if($value.Current.Value -cne [string]$a.body_text){Fail 'composer_verification_failed'}
-   $window=Get-Teams;Assert-SelfWindow $window
-   $sendButtons=@(Elements $window | Where-Object {$_.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $_.Current.Name -ceq 'Send' -and $_.Current.IsEnabled})
-   if($sendButtons.Count -ne 1){Fail 'composer_verification_failed'}
-   $window=Get-Teams;Assert-SelfWindow $window;Assert-DesktopIdle $window
-   $sendInvoked=$true
-   ([System.Windows.Automation.InvokePattern]$sendButtons[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
-   $submitted=Stamp (Get-Date);$observed=@();$normalized=[regex]::Replace([string]$a.body_text,'\s+',' ').Trim()
-   for($i=0;$i -lt 35;$i++){
-    Start-Sleep -Milliseconds 200;$window=Get-Teams;Assert-SelfWindow $window
-    $observed=@(Bodies $window | Where-Object {$_.observed_id -notin $beforeIds -and ([regex]::Replace($_.text,'\s+',' ')).IndexOf($normalized,[StringComparison]::Ordinal) -ge 0})
-    if($observed.Count -gt 0){break}
-   }
-   if($observed.Count -ne 1){Fail 'mutation_outcome_unknown'}
-   $result=@{recipient_email='joshua.yorko@gainwelltechnologies.com';chat_name='Yorko, Joshua (You)';status='observed';observed_id=$observed[0].observed_id;body_digest=(Hash ([string]$a.body_text));submitted_at=$submitted}
-  }
+
  }
  $envelope=@{version=1;ok=$true;result=$result}
 }catch{
  $code=$_.Exception.Message
- if($sendInvoked){$code='mutation_outcome_unknown'}
- $known=@('invalid_input','desktop_busy','navigation_requires_foreground','not_found','stale_message','stale_draft','unresolved_recipient','archive_protected','archive_unavailable','ambiguous_chat','stale_chat','chat_navigation_unverified','app_unavailable','app_not_ready','self_identity_unverified','composer_unavailable','composer_not_empty','composer_verification_failed','mutation_outcome_unknown')
+ $known=@('invalid_input','desktop_busy','navigation_requires_foreground','not_found','stale_message','stale_draft','unresolved_recipient','archive_protected','archive_unavailable','ambiguous_chat','stale_chat','chat_navigation_unverified','app_unavailable','app_not_ready','self_identity_unverified')
  if($code -notin $known){$code=if($mutationStarted){'mutation_outcome_unknown'}else{'desktop_operation_failed'}}
  $envelope=@{version=1;ok=$false;error=$code}
 }finally{

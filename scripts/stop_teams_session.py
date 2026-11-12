@@ -22,6 +22,8 @@ def main():
         kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         handle = kernel.OpenProcess(0x00100000, False, int(control.get("pid", 0)))
+        if not handle:
+            return
         try:
             invoke("shutdown", {"token": control["token"]}, timeout=10)
             if handle:

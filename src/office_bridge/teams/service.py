@@ -8,20 +8,52 @@ from pathlib import Path
 
 from office_bridge import desktop
 from office_bridge.teams import ledger
-from office_bridge.teams.models import GroupReceipt, WebChatHistory, WebSelfReceipt
+from office_bridge.teams.models import (
+    GroupReceipt,
+    WebChatHistory,
+    WebChatMessage,
+    WebChatRef,
+    WebChatSearchResult,
+)
 
 
 class TeamsError(RuntimeError):
     """Bounded, user-facing operation failure."""
 
 
-def read_chat(operation: str, chat: str, limit: int) -> WebChatHistory:
+def list_chats(name: str | None, limit: int) -> WebChatSearchResult:
     try:
-        result = desktop.invoke(operation, {"limit": limit})
+        result = desktop.invoke("teams_web_list_chats", {"name": name, "limit": limit})
+        if result.get("state") != "listed":
+            raise ValueError("unverified")
+        items = [WebChatRef.model_validate(item) for item in result["items"]]
+        if name is not None and any(item.title != name for item in items):
+            raise ValueError("inexact match")
+        return WebChatSearchResult(
+            items=items,
+            scope="currently_loaded_chat_list",
+            truncated=result["truncated"],
+        )
+    except desktop.BridgeError as error:
+        raise TeamsError(f"Could not safely list Teams chats: {error.code}.") from None
+    except (KeyError, ValueError):
+        raise TeamsError("Could not safely list verified Teams chats.") from None
+
+
+def read_chat(chat: WebChatRef, limit: int) -> WebChatHistory:
+    try:
+        result = desktop.invoke(
+            "teams_web_read_chat",
+            {"chat": chat.model_dump(mode="json"), "limit": limit},
+        )
         if result.get("state") != "read":
             raise ValueError("unverified")
+        if result.get("chat_id") != chat.chat_id or result.get("title") != chat.title:
+            raise ValueError("chat identity mismatch")
         return WebChatHistory(
-            chat=chat, scope="currently_loaded_history", messages=result["messages"]
+            chat=chat,
+            scope="currently_loaded_history",
+            messages=[WebChatMessage.model_validate(message) for message in result["messages"]],
         )
     except desktop.BridgeError as error:
         raise TeamsError(f"Could not safely read the specified Teams chat: {error.code}.") from None
@@ -29,7 +61,14 @@ def read_chat(operation: str, chat: str, limit: int) -> WebChatHistory:
         raise TeamsError("Could not safely read the specified Teams chat.") from None
 
 
-def send_group(body: str, request_id: str) -> GroupReceipt:
+def send_chat(chat: WebChatRef, body: str, request_id: str) -> GroupReceipt:
+    try:
+        if ledger.has_request_id(request_id):
+            raise TeamsError(
+                "Request ID exists in the retired self-send ledger; do not retry or reuse it."
+            )
+    except ledger.SendLedgerError:
+        raise TeamsError("Could not safely check prior send history.") from None
     path = (
         Path(os.environ["LOCALAPPDATA"])
         / "OfficeActionServer"
@@ -45,7 +84,14 @@ def send_group(body: str, request_id: str) -> GroupReceipt:
         db.execute("BEGIN IMMEDIATE")
         old = db.execute("SELECT digest, receipt FROM sends WHERE id=?", (request_id,)).fetchone()
         if old:
-            if old[0] != digest or not old[1]:
+            try:
+                saved = json.loads(old[1]) if old[1] else {}
+                old_chat = saved.get("chat")
+                if isinstance(old_chat, dict):
+                    old_chat = WebChatRef.model_validate(old_chat)
+            except (TypeError, ValueError):
+                old_chat = None
+            if old[0] != digest or old_chat != chat:
                 raise TeamsError(
                     "Request already attempted or conflicts; do not retry automatically."
                 )
@@ -53,7 +99,10 @@ def send_group(body: str, request_id: str) -> GroupReceipt:
         db.execute("INSERT INTO sends(id,digest,receipt) VALUES (?,?,NULL)", (request_id, digest))
         db.commit()
     try:
-        result = desktop.invoke("teams_web_send_group", {"body": body, "request_id": request_id})
+        result = desktop.invoke(
+            "teams_web_send_chat",
+            {"chat": chat.model_dump(mode="json"), "body": body, "request_id": request_id},
+        )
         if (
             result.get("state") != "observed"
             or not result.get("message_id")
@@ -62,7 +111,7 @@ def send_group(body: str, request_id: str) -> GroupReceipt:
             raise ValueError("unverified")
         receipt = GroupReceipt(
             status="observed",
-            chat="QA-ASSIST-VERINT-DEPLOY",
+            chat=chat,
             message_id=result["message_id"],
             time=result["time"],
         )
@@ -72,30 +121,6 @@ def send_group(body: str, request_id: str) -> GroupReceipt:
             )
         return receipt
     except Exception:
-        raise TeamsError(
-            "Send outcome unknown; inspect the chat before considering any retry."
-        ) from None
-
-
-def send_self(body: str, request_id: str) -> WebSelfReceipt:
-    def submit():
-        result = desktop.invoke("teams_web_send_self", {"body": body, "request_id": request_id})
-        if result.get("state") != "observed":
-            raise ValueError("unverified")
-        return {
-            "status": "observed",
-            "message_id": result.get("message_id"),
-            "recipient": ledger.RECIPIENT,
-            "account_verified": True,
-            "send_clicked": True,
-        }
-
-    try:
-        result = ledger.send_once(request_id, body, submit)
-        return WebSelfReceipt(
-            status=result["status"], chat="Yorko, Joshua (You)", message_id=result["message_id"]
-        )
-    except (ledger.SendLedgerError, KeyError, ValueError):
         raise TeamsError(
             "Send outcome unknown; inspect the chat before considering any retry."
         ) from None

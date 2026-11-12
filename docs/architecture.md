@@ -29,7 +29,7 @@ All browser work is confined to the isolated session. Its containing window is n
 
 `package.yaml` declares RCC worker dependencies and `pythonpath: src`. `robocorp-browser` resolves its compatible Playwright dependency. `scripts/requirements-dev.txt` declares the separate launcher/development environment installed by `powershell/setup.ps1`.
 
-`bootstrap.ps1` orchestrates setup, RCC trust, SDK and Runtime installation, startup, read-only verification, and Codex registration. `office_bridge/runtime/local_state.py` keeps the private device key and chat configuration independent of disposable checkout state. Application RCC environments use the device's `OfficeActionServer/rcc-actions` directory unless `ACTIONS_HOME` is explicitly set.
+`bootstrap.ps1` orchestrates setup, RCC trust, SDK and Runtime installation, startup, read-only verification, and Codex registration. `office_bridge/runtime/local_state.py` keeps the private device key and expected account independent of disposable checkout state. Application RCC environments use the device's `OfficeActionServer/rcc-actions` directory unless `ACTIONS_HOME` is explicitly set.
 
 `scripts/package_layout.py` derives staged files from `src/` and `package.yaml`. It excludes generated caches and never enumerates `.runtime` or private state as package input. It removes retired staged sources and copies only changed files. Development watching covers `src/` recursively, including added and removed files.
 

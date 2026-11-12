@@ -9,8 +9,9 @@ if ($proc) {
     if (-not $proc.CommandLine.Contains($expected)) { throw 'PID was reused; refusing to stop an unrelated process.' }
     $runtimePython = Join-Path $taskRoot '.runtime\Scripts\python.exe'
     if (Test-Path -LiteralPath $runtimePython) { & $runtimePython (Join-Path $taskRoot 'scripts\stop_teams_session.py') }
-    & taskkill.exe /PID $serverPid /T /F | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not stop the Office Action Server process tree.' }
+    $kill = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\taskkill.exe') -ArgumentList @('/PID', [string]$serverPid, '/T', '/F') -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $taskRoot '.state\stop.stdout.log') -RedirectStandardError (Join-Path $taskRoot '.state\stop.stderr.log')
+    $remaining = Get-CimInstance Win32_Process -Filter "ProcessId = $serverPid"
+    if ($kill.ExitCode -ne 0 -and $remaining) { throw 'Could not stop the Office Action Server process tree; inspect .state/stop.stderr.log.' }
 }
 Remove-Item -LiteralPath $pidFile
 Write-Output 'Office Action Server stopped.'

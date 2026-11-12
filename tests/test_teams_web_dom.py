@@ -9,7 +9,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "src/office_bridge/native/teams/chat.js").read_text(encoding="utf-8")
 CHAT_ID = "19:" + "a" * 32 + "@thread.v2"
-TITLE = "QA-ASSIST-VERINT-DEPLOY"
+TITLE = "Example Group"
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def page():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=str(executable), headless=True)
         page = browser.new_page()
-        html = f"""<button data-tid="me-control-avatar-trigger" aria-label="joshua.yorko@gainwelltechnologies.com"></button>
+        html = f"""<button data-tid="me-control-avatar-trigger" aria-label="person@example.invalid"></button>
         <div data-tid="app-bar-wrapper"><button aria-label="Chat"></button></div>
         <div role="treeitem" data-fui-tree-item-value="folder|{CHAT_ID}" onclick="window.navs=(window.navs||0)+1"><span>{TITLE}</span></div>
         <div id="chat-header-{CHAT_ID}"><h2 data-tid="chat-title">{TITLE}</h2></div>
@@ -38,10 +38,22 @@ def page():
         browser.close()
 
 
-def run(page, phase, body="hello", chat_id=CHAT_ID):
+def run(page, phase, body="hello", chat_id=CHAT_ID, title=TITLE):
     return page.evaluate(
-        "([source,phase,body,id,title]) => (0,eval)('('+source+')')(phase,body,id,title,'test-id')",
-        [SCRIPT, phase, body, chat_id, TITLE],
+        "([source,request]) => (0,eval)('('+source+')')(request)",
+        [
+            SCRIPT,
+            {
+                "phase": phase,
+                "body": body,
+                "chatId": chat_id,
+                "title": title,
+                "limit": 20,
+                "requestId": "test-id",
+                "authorName": "Example User",
+                "navigationId": "test-id",
+            },
+        ],
     )
 
 
@@ -54,6 +66,33 @@ def test_wrong_chat_and_existing_draft_prevent_mutation(page):
     assert page.locator('[data-tid="ckeditor"]').inner_text() == "existing draft"
 
 
+def test_loading_chat_list_does_not_repeat_navigation(page):
+    page.evaluate(
+        """() => {
+          document.querySelector('[role=treeitem]').remove();
+          const tab=document.querySelector('[aria-label=Chat]');
+          tab.onclick=()=>window.opens=(window.opens||0)+1;
+        }"""
+    )
+    for _ in range(4):
+        assert run(page, "navigate")["state"] == "waiting"
+    assert page.evaluate("window.opens") == 1
+    page.evaluate(
+        """([id,title]) => {
+          const row=document.createElement('div');
+          row.setAttribute('role','treeitem');
+          row.setAttribute('data-fui-tree-item-value','folder|'+id);
+          const name=document.createElement('span');name.textContent=title;row.appendChild(name);
+          row.onclick=()=>window.navs=(window.navs||0)+1;
+          document.body.appendChild(row);
+        }""",
+        [CHAT_ID, TITLE],
+    )
+    assert run(page, "navigate")["state"] == "navigated"
+    assert page.evaluate("window.opens") == 1
+    assert page.evaluate("window.navs") == 1
+
+
 def test_single_click_and_verified_loaded_history(page):
     assert run(page, "prepare")["state"] == "prepared"
     page.locator('[data-tid="ckeditor"]').fill("hello")
@@ -61,7 +100,7 @@ def test_single_click_and_verified_loaded_history(page):
     assert run(page, "send")["state"] == "failed"
     assert page.evaluate("window.clicks") == 1
     page.evaluate(
-        """() => { const row=document.createElement('div');row.innerHTML='<span data-tid="message-author-name">Yorko, Joshua</span><time datetime="2026-11-12T19:06:15.584Z"></time><div data-tid="chat-pane-message" data-mid="5427607633819443908" id="message-body-5427607633819443908">hello</div>';document.body.appendChild(row); }"""
+        """() => { const row=document.createElement('div');row.innerHTML='<span data-tid="message-author-name">Example User</span><time datetime="2026-11-12T19:06:15.584Z"></time><div data-tid="chat-pane-message" data-mid="5427607633819443908" id="message-body-5427607633819443908">hello</div>';document.body.appendChild(row); }"""
     )
     assert run(page, "observe")["state"] == "waiting"
     page.evaluate(
@@ -82,12 +121,43 @@ def test_duplicate_titles_do_not_redirect_to_another_conversation(page):
 
 def test_self_chat_uses_its_pinned_conversation_and_preserves_draft(page):
     page.evaluate(
-        """() => { document.querySelector('[role=treeitem]').setAttribute('data-fui-tree-item-value','folder|48:notes');document.querySelector('[role=treeitem] span').textContent='Yorko, Joshua (You)';document.querySelector('[data-tid=chat-title]').textContent='Yorko, Joshua (You)';document.querySelector('[id^=chat-header]').id='chat-header-48:notes';document.querySelector('[data-tid=ckeditor]').textContent='unfinished'; }"""
+        """() => { document.querySelector('[role=treeitem]').setAttribute('data-fui-tree-item-value','folder|48:notes');document.querySelector('[role=treeitem] span').textContent='Example User';document.querySelector('[data-tid=chat-title]').textContent='Example User';document.querySelector('[id^=chat-header]').id='chat-header-48:notes';document.querySelector('[data-tid=ckeditor]').textContent='unfinished'; }"""
     )
     result = page.evaluate(
-        "source => (0,eval)('('+source+')')('prepare','hello','48:notes','Yorko, Joshua (You)','self-1')",
-        SCRIPT,
+        "([source,request]) => (0,eval)('('+source+')')(request)",
+        [
+            SCRIPT,
+            {
+                "phase": "prepare",
+                "body": "hello",
+                "chatId": "48:notes",
+                "title": "Example User",
+                "requestId": "self-1",
+                "authorName": "Example User",
+                "navigationId": "self-1",
+            },
+        ],
     )
     assert result["state"] == "draft_exists"
     assert page.locator('[data-tid="ckeditor"]').inner_text() == "unfinished"
     assert page.evaluate("window.clicks || 0") == 0
+
+
+def test_generic_list_and_read_return_the_chat_reference(page):
+    page.evaluate(
+        """([id,title]) => {
+          const row=document.querySelector('[role=treeitem]');
+          row.setAttribute('data-fui-tree-item-value','folder|'+id);
+          row.querySelector('span').textContent=title;
+          const header=document.querySelector('[id^=chat-header]');
+          header.id='chat-header-'+id;
+          header.querySelector('[data-tid=chat-title]').textContent=title;
+        }""",
+        [CHAT_ID, TITLE],
+    )
+    listed = run(page, "list")
+    assert listed["items"] == [{"chat_id": CHAT_ID, "title": TITLE}]
+    verified = run(page, "read", chat_id=CHAT_ID)
+    assert verified["state"] == "read"
+    assert verified["chat_id"] == CHAT_ID
+    assert verified["title"] == TITLE

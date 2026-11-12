@@ -16,7 +16,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
 
-RECIPIENT = "joshua.yorko@gainwelltechnologies.com"
 LEDGER_PATH = (
     Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
     / "OfficeActionServer"
@@ -26,6 +25,13 @@ LEDGER_PATH = (
 LOCK_TIMEOUT_SECONDS = 3.0
 _KEY_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$", re.ASCII)
 _thread_lock = threading.Lock()
+
+
+def expected_recipient() -> str:
+    value = os.environ.get("OFFICE_TEAMS_EXPECTED_ACCOUNT", "").strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+        raise SendLedgerError("expected_account_unconfigured")
+    return value
 
 
 class SendLedgerError(RuntimeError):
@@ -111,6 +117,7 @@ def _read(path: Path) -> dict:
             or not isinstance(data.get("entries"), dict)
         ):
             raise ValueError
+        recipient = expected_recipient()
         for key, entry in data["entries"].items():
             if (
                 not isinstance(key, str)
@@ -118,7 +125,7 @@ def _read(path: Path) -> dict:
                 or not isinstance(entry, dict)
                 or not isinstance(entry.get("body_sha256"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", entry["body_sha256"])
-                or entry.get("recipient") != RECIPIENT
+                or entry.get("recipient") != recipient
                 or entry.get("status")
                 not in {"attempted", "outcome_unknown", "retryable_not_sent", "observed"}
                 or not isinstance(entry.get("created_at"), str)
@@ -193,6 +200,7 @@ def send_once(idempotency_key: str, body_text: str, submit: Callable[[], dict]) 
     if not callable(submit):
         raise SendLedgerError("invalid_submit")
     body_hash = hashlib.sha256(body_text.encode("utf-8")).hexdigest()
+    recipient = expected_recipient()
     path = Path(LEDGER_PATH)
     with _file_lock(path):
         ledger = _read(path)
@@ -210,7 +218,7 @@ def send_once(idempotency_key: str, body_text: str, submit: Callable[[], dict]) 
 
         ledger["entries"][idempotency_key] = {
             "body_sha256": body_hash,
-            "recipient": RECIPIENT,
+            "recipient": recipient,
             "created_at": entry["created_at"]
             if entry
             else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -229,7 +237,7 @@ def send_once(idempotency_key: str, body_text: str, submit: Callable[[], dict]) 
             result = {}
         recipient = result.get("recipient")
         identity_ok = result.get("account_verified") is not False and (
-            recipient is None or recipient == RECIPIENT
+            recipient is None or recipient == expected_recipient()
         )
         status = result.get("status")
         clicked = result.get("send_clicked") is True
@@ -255,3 +263,12 @@ def send_once(idempotency_key: str, body_text: str, submit: Callable[[], dict]) 
         ledger["entries"][idempotency_key]["status"] = "outcome_unknown"
         _write(path, ledger)
         return _safe_receipt(result, "outcome_unknown")
+
+
+def has_request_id(idempotency_key: str) -> bool:
+    """Check the retired self-send ledger before using the generic chat ledger."""
+    if not isinstance(idempotency_key, str) or not _KEY_RE.fullmatch(idempotency_key):
+        raise SendLedgerError("invalid_idempotency_key")
+    path = Path(LEDGER_PATH)
+    with _file_lock(path):
+        return idempotency_key in _read(path)["entries"]

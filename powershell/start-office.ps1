@@ -1,4 +1,4 @@
-param([switch]$Dev)
+param([switch]$Dev, [string]$TeamsAccount)
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $stateDir = Join-Path $taskRoot '.state'
@@ -20,6 +20,7 @@ if ($activeListener) {
 }
 $prepareArguments = @((Join-Path $taskRoot 'scripts\prepare_state.py'))
 if ($Dev) { $prepareArguments += '--dev' }
+if (-not [string]::IsNullOrWhiteSpace($TeamsAccount)) { $prepareArguments += @('--teams-account', $TeamsAccount) }
 & $runtimePython @prepareArguments
 if ($LASTEXITCODE -ne 0) { throw 'Private device configuration could not be prepared.' }
 $launcher = Join-Path $taskRoot 'scripts\run_server.py'

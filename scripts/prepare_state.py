@@ -12,6 +12,7 @@ from office_bridge.runtime.local_state import config_directory, prepare
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dev", action="store_true")
+    parser.add_argument("--teams-account")
     args = parser.parse_args()
     config = config_directory()
     config.mkdir(parents=True, exist_ok=True)
@@ -30,7 +31,7 @@ def main():
     )
     if result.returncode:
         raise SystemExit("Could not restrict device configuration access")
-    prepare(ROOT, dev=args.dev)
+    prepare(ROOT, dev=args.dev, teams_account=args.teams_account)
     print("Private device configuration prepared; existing credentials preserved.")
 
 

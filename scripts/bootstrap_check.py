@@ -49,7 +49,8 @@ def verify(*, dev: bool, timeout: int = 600) -> dict:
 
         tool("outlook_inbox_list")
         status_tool = tool("teams_web_status")
-        read_tool = tool("teams_web_read_self_chat")
+        list_chats_tool = tool("teams_web_list_chats")
+        read_chat_tool = tool("teams_web_read_chat")
         deadline = time.monotonic() + 120
         while True:
             status = unwrap(client.call(status_tool, {}))
@@ -85,10 +86,52 @@ def verify(*, dev: bool, timeout: int = 600) -> dict:
             raise RuntimeError(
                 f"Teams bootstrap is not verified ({status['state']}); inspect private status logs"
             )
-        history = unwrap(client.call(read_tool, {"limit": 1}))
+        destination.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        chat_deadline = time.monotonic() + 120
+        self_chat = None
+        while time.monotonic() < chat_deadline:
+            try:
+                listed = unwrap(client.call(list_chats_tool, {"limit": 100}))
+            except (RuntimeError, requests.RequestException) as exc:
+                if time.monotonic() + 2 >= chat_deadline:
+                    raise RuntimeError("Teams chat list did not become available") from exc
+                time.sleep(2)
+                continue
+            if listed.get("scope") != "currently_loaded_chat_list":
+                raise RuntimeError("Teams list did not report the currently loaded chat list")
+            matches = [
+                chat for chat in listed.get("items", []) if chat.get("chat_id") == "48:notes"
+            ]
+            if len(matches) > 1:
+                raise RuntimeError("Teams self-chat ID is ambiguous")
+            if matches:
+                self_chat = matches[0]
+                break
+            time.sleep(2)
+        if self_chat is None:
+            raise RuntimeError("Teams self-chat did not appear in the loaded chat list")
+        if not isinstance(self_chat.get("title"), str) or not self_chat["title"].strip():
+            raise RuntimeError("Teams self-chat title is missing")
+        report["checks"].append("teams_web_list_chats")
+
+        chat_ref = {"chat_id": self_chat["chat_id"], "title": self_chat["title"]}
+        for attempt in range(1, 3):
+            report["read_attempts"] = attempt
+            try:
+                history = unwrap(client.call(read_chat_tool, {"chat": chat_ref, "limit": 1}))
+                break
+            except (RuntimeError, requests.RequestException):
+                destination.write_text(json.dumps(report, indent=2), encoding="utf-8")
+                if attempt == 2:
+                    raise
+                print(
+                    "Teams chat is not ready; repeating the read-only startup check once.",
+                    flush=True,
+                )
+                time.sleep(2)
         if history.get("scope") != "currently_loaded_history":
             raise RuntimeError("Teams self-chat read was not verified")
-        report["checks"].append("teams_web_read_self_chat")
+        report["checks"].append("teams_web_read_chat")
         report["self_chat_message_count"] = len(history["messages"])
         report["verified"] = True
         destination.write_text(json.dumps(report, indent=2), encoding="utf-8")

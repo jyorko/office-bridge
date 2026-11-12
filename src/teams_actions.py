@@ -6,7 +6,13 @@ from actions import ActionError, Response, action
 from pydantic import Field
 
 from office_bridge.teams import backend, service
-from office_bridge.teams.models import GroupReceipt, TeamsWebStatus, WebChatHistory, WebSelfReceipt
+from office_bridge.teams.models import (
+    GroupReceipt,
+    TeamsWebStatus,
+    WebChatHistory,
+    WebChatRef,
+    WebChatSearchResult,
+)
 
 
 def _respond(operation, *args):
@@ -31,52 +37,44 @@ def teams_web_status(
 
 
 @action(is_consequential=False)
-def teams_web_read_qa_chat(
-    limit: Annotated[int, Field(ge=1, le=50)] = 20,
-) -> Response[WebChatHistory]:
-    """Read loaded messages from the verified QA-ASSIST-VERINT-DEPLOY chat.
+def teams_web_list_chats(
+    name: Annotated[str | None, Field(min_length=1, max_length=120)] = None,
+    limit: Annotated[int, Field(ge=1, le=100)] = 100,
+) -> Response[WebChatSearchResult]:
+    """List verified references in the currently loaded Teams chat list.
 
     Args:
-        limit: Maximum loaded messages to return, up to 50.
+        name: Optional exact chat title filter.
+        limit: Maximum references to return, up to 100.
     """
-    return _respond(service.read_chat, "teams_web_read_group", "QA-ASSIST-VERINT-DEPLOY", limit)
+    return _respond(service.list_chats, name, limit)
 
 
 @action(is_consequential=False)
-def teams_web_read_self_chat(
+def teams_web_read_chat(
+    chat: WebChatRef,
     limit: Annotated[int, Field(ge=1, le=50)] = 20,
 ) -> Response[WebChatHistory]:
-    """Read loaded messages from the verified self chat.
+    """Read loaded history from the verified exact chat reference.
 
     Args:
+        chat: Exact chat reference returned by teams_web_list_chats.
         limit: Maximum loaded messages to return, up to 50.
     """
-    return _respond(service.read_chat, "teams_web_read_self", "Yorko, Joshua (You)", limit)
+    return _respond(service.read_chat, chat, limit)
 
 
 @action(is_consequential=True)
-def teams_web_send_qa_chat(
+def teams_web_send_chat(
+    chat: WebChatRef,
     body: Annotated[str, Field(min_length=1, max_length=2000)],
     request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
 ) -> Response[GroupReceipt]:
-    """Send a plain-text message to QA-ASSIST-VERINT-DEPLOY at most once per request ID.
+    """Send one message to the verified exact chat reference at most once per request ID.
 
     Args:
-        body: Complete message text, sent only to the specified group chat.
+        chat: Exact chat reference returned by teams_web_list_chats.
+        body: Complete plain-text message, sent only to the referenced chat.
         request_id: Unique request ID; uncertain outcomes cannot be retried.
     """
-    return _respond(service.send_group, body, request_id)
-
-
-@action(is_consequential=True)
-def teams_web_send_self(
-    body: Annotated[str, Field(min_length=1, max_length=2000)],
-    request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
-) -> Response[WebSelfReceipt]:
-    """Send one message to the verified self chat, with at-most-once request handling.
-
-    Args:
-        body: Complete plain-text message to your own chat.
-        request_id: Unique request ID; uncertain outcomes cannot be retried.
-    """
-    return _respond(service.send_self, body, request_id)
+    return _respond(service.send_chat, chat, body, request_id)

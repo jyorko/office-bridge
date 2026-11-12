@@ -6,6 +6,7 @@ from office_bridge.teams import ledger
 
 
 def use_tmp_ledger(tmp_path, monkeypatch):
+    monkeypatch.setenv("OFFICE_TEAMS_EXPECTED_ACCOUNT", "person@example.invalid")
     path = tmp_path / "OfficeActionServer" / "teams-web-sends" / "ledger.json"
     monkeypatch.setattr(ledger, "LEDGER_PATH", path)
     return path
@@ -25,7 +26,7 @@ def test_observed_send_is_durable_and_replay_does_not_submit(tmp_path, monkeypat
             "status": "observed",
             "send_clicked": True,
             "message_id": "msg-123",
-            "recipient": ledger.RECIPIENT,
+            "recipient": ledger.expected_recipient(),
             "account_verified": True,
             "body": "must not persist",
             "debug": "secret",
@@ -36,7 +37,7 @@ def test_observed_send_is_durable_and_replay_does_not_submit(tmp_path, monkeypat
     assert first == {
         "status": "observed",
         "message_id": "msg-123",
-        "recipient": ledger.RECIPIENT,
+        "recipient": ledger.expected_recipient(),
         "account_verified": True,
         "send_clicked": True,
     }

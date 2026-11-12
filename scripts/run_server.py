@@ -9,6 +9,8 @@ from _bootstrap import ROOT
 from actions.server.cli import main
 from package_layout import stage_package, watch_sources
 
+from office_bridge.runtime.local_state import configured_account
+
 STATE = ROOT / ".state"
 
 
@@ -17,6 +19,7 @@ if __name__ == "__main__":
     os.environ.setdefault(
         "ACTIONS_HOME", str(Path(os.environ["LOCALAPPDATA"]) / "OfficeActionServer/rcc-actions")
     )
+    os.environ["OFFICE_BRIDGE_ACCOUNT"] = configured_account()
     dev = "--dev" in sys.argv[1:]
     key = "" if dev else (STATE / ".api_key").read_text(encoding="utf-8").strip()
     if not dev and len(key) < 32:

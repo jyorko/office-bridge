@@ -25,7 +25,7 @@ def main():
             evidence.get("verified") is True
             and evidence.get("dev") is args.dev
             and evidence.get("mcp_url") == "http://127.0.0.1:8766/mcp"
-            and "teams_web_read_self_chat" in evidence.get("checks", [])
+            and "teams_web_read_chat" in evidence.get("checks", [])
             and (args.dev or evidence.get("authenticated") is True)
         ):
             raise SystemExit(

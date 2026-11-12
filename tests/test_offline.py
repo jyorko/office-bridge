@@ -8,7 +8,6 @@ import pytest
 from pydantic import ValidationError
 
 import outlook_actions as api
-from desktop_teams_actions import teams_send_self_message
 from office_bridge import desktop as bridge
 from office_bridge.teams.models import ChatRef
 
@@ -75,7 +74,6 @@ def test_structured_failures_do_not_retry(fake_process, code):
         ("get_message", "timeout"),
         ("send_draft", "mutation_outcome_unknown"),
         ("create_mail_draft", "mutation_outcome_unknown"),
-        ("send_self_message", "mutation_outcome_unknown"),
     ],
 )
 def test_timeout_terminates_only_own_tree(fake_process, operation, code):
@@ -116,11 +114,3 @@ def test_output_contract_rejects_unexpected_fields(fake_process):
     fake_process["envelope"]["result"]["run_script"] = "danger"
     with pytest.raises(ValidationError):
         api.outlook_inbox_list()
-
-
-def test_self_send_guard_failure_is_exposed_without_retry(fake_process):
-    fake_process["envelope"] = {"version": 1, "ok": False, "error": "self_identity_unverified"}
-    with pytest.raises(Exception, match="self_identity_unverified"):
-        teams_send_self_message("Synthetic self test")
-    assert fake_process["request"]["operation"] == "send_self_message"
-    assert fake_process["request"]["arguments"] == {"body_text": "Synthetic self test"}
