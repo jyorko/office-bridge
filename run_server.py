@@ -18,7 +18,7 @@ def watch_sources():
     authored = {
         ROOT / path.relative_to(staged)
         for path in staged.rglob("*")
-        if path.is_file() and path.suffix in {".py", ".yaml", ".ps1", ".js"}
+        if path.is_file() and path.suffix in {".py", ".yaml", ".ps1", ".js", ".cs"}
     }
     for changes in watch(
         ROOT, ROOT / "powershell", recursive=False,
@@ -38,6 +38,8 @@ if __name__ == "__main__":
         raise SystemExit("Missing local API key. Run start-office.ps1 first.")
     if dev:
         threading.Thread(target=watch_sources, daemon=True).start()
+    from teams_supervisor import start as start_teams_session
+    start_teams_session(ROOT)
     main([
         "start", "--address", "127.0.0.1", "--port", "8766",
         "--dir", str(ROOT / ".package"), "--datadir", str(STATE / "managed-server"),

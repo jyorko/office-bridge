@@ -163,13 +163,11 @@ def test_status_preserves_edge_attachment_denial_diagnosis(tmp_path, monkeypatch
     assert result["reason"] == "browser_attachment_denied"
 
 
-def test_webview2_status_routes_through_fixed_native_bridge_under_lock(tmp_path, monkeypatch):
+def test_webview2_status_routes_through_persistent_session_bridge(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     import desktop_bridge
-    import install_webview2_sdk
 
     calls = []
-    monkeypatch.setattr(install_webview2_sdk, "install", lambda: calls.append("install"))
 
     def invoke(operation, arguments):
         calls.append((operation, arguments))
@@ -184,7 +182,7 @@ def test_webview2_status_routes_through_fixed_native_bridge_under_lock(tmp_path,
     result = backend.backend_status("webview2")
     assert result["backend"] == "webview2"
     assert result["state"] == "needs_interactive_login"
-    assert calls == ["install", ("teams_web_status", {})]
+    assert calls == [("teams_web_status", {})]
     with backend.profile_lock("webview2", timeout=0.1) as profile:
         assert profile == tmp_path / "OfficeActionServer" / "teams-webview2-profile"
 

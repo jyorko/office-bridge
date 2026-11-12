@@ -5,11 +5,10 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-OPERATIONS = frozenset({"inbox_list", "get_message", "search_inbox", "create_reply_draft", "create_mail_draft", "send_draft", "archive", "list_chats", "read_chat", "send_self_message", "download_attachments", "teams_web_status", "teams_web_send_group"})
-MUTATIONS = frozenset({"create_reply_draft", "create_mail_draft", "send_draft", "archive", "send_self_message", "download_attachments", "teams_web_send_group"})
+OPERATIONS = frozenset({"inbox_list", "get_message", "search_inbox", "create_reply_draft", "create_mail_draft", "send_draft", "archive", "list_chats", "read_chat", "send_self_message", "download_attachments", "teams_web_status", "teams_web_send_group", "teams_web_send_self", "teams_web_read_group", "teams_web_read_self"})
+MUTATIONS = frozenset({"create_reply_draft", "create_mail_draft", "send_draft", "archive", "send_self_message", "download_attachments", "teams_web_send_group", "teams_web_send_self"})
 MAX_BYTES = 1_048_576
 SCRIPT = Path(__file__).parent / "powershell" / "office.ps1"
-TEAMS_WEBVIEW_SCRIPT = Path(__file__).parent / "powershell" / "teams_webview.ps1"
 
 
 class BridgeError(RuntimeError):
@@ -23,16 +22,21 @@ def invoke(operation: str, arguments: dict) -> dict:
         raise BridgeError("invalid_operation")
     if os.name != "nt":
         raise BridgeError("windows_required")
+    if operation in {"teams_web_status", "teams_web_send_group", "teams_web_send_self", "teams_web_read_group", "teams_web_read_self"}:
+        from teams_web_session import SessionError, invoke as invoke_session
+        try:
+            return invoke_session(operation, arguments, timeout=90)
+        except SessionError as error:
+            raise BridgeError("mutation_outcome_unknown" if operation in MUTATIONS else error.args[0]) from None
     executable = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    script = (SCRIPT.with_name("attachments.ps1") if operation == "download_attachments"
-              else TEAMS_WEBVIEW_SCRIPT if operation in {"teams_web_status", "teams_web_send_group"} else SCRIPT)
+    script = SCRIPT.with_name("attachments.ps1") if operation == "download_attachments" else SCRIPT
     with tempfile.TemporaryDirectory(prefix="office-action-") as directory:
         request = Path(directory) / "request.json"
         result = Path(directory) / "result.json"
         request.write_text(json.dumps({"version": 1, "operation": operation, "arguments": arguments}, ensure_ascii=False), encoding="utf-8")
         process = subprocess.Popen([str(executable), "-NoProfile", "-NonInteractive", "-STA", "-File", str(script), "-RequestFile", str(request), "-ResultFile", str(result)], shell=False, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
-            process.wait(timeout=120 if operation == "teams_web_send_group" else 90 if operation == "teams_web_status" else 45 if operation in MUTATIONS else 30)
+            process.wait(timeout=45 if operation in MUTATIONS else 30)
         except subprocess.TimeoutExpired:
             # Kill only this subprocess tree. Never terminate Office applications.
             try:

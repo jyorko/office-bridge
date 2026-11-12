@@ -22,7 +22,7 @@ PROFILE_NAMES: dict[str, str] = {
 _thread_locks = {engine: threading.Lock() for engine in PROFILE_NAMES}
 
 
-def profile_path(engine: BrowserEngine = "chromium") -> Path:
+def profile_path(engine: Backend = "chromium") -> Path:
     """Resolve an engine to its fixed managed profile directory."""
     if engine not in PROFILE_NAMES:
         raise ValueError(f"Unsupported browser engine: {engine}")
@@ -30,7 +30,7 @@ def profile_path(engine: BrowserEngine = "chromium") -> Path:
 
 
 @contextmanager
-def profile_lock(engine: BrowserEngine = "chromium", timeout: float = 3) -> Iterator[Path]:
+def profile_lock(engine: Backend = "chromium", timeout: float = 3) -> Iterator[Path]:
     """Serialize access to one profile across threads and worker processes."""
     lock = _thread_locks[engine]
     if not lock.acquire(timeout=timeout):
@@ -171,25 +171,21 @@ def status(engine: BrowserEngine = "chromium") -> dict[str, str]:
 def webview2_status() -> dict[str, object]:
     """Run the fixed native adapter behind the same per-profile lock."""
     from desktop_bridge import BridgeError, invoke
-    from install_webview2_sdk import install
-
     result: dict[str, object] = {
         "state": "failed", "hostname": "teams.cloud.microsoft", "path": "/",
         "backend": "webview2",
     }
     try:
-        with profile_lock("webview2"):
-            install()
-            native = invoke("teams_web_status", {})
-            result.update(native)
-            result["backend"] = "webview2"
-            if native.get("state") == "authenticated":
-                if native.get("account_verified") is not True:
-                    result.update(state="failed", reason="account_unverified")
-                elif native.get("host_visible") is not False or native.get("control_visible") is not False:
-                    result.update(state="failed", reason="host_visible")
-                elif native.get("host_focused") is not False or native.get("foreground_interference") is not False:
-                    result.update(state="failed", reason="foreground_interference")
+        native = invoke("teams_web_status", {})
+        result.update(native)
+        result["backend"] = "webview2"
+        if native.get("state") == "authenticated":
+            if native.get("account_verified") is not True:
+                result.update(state="failed", reason="account_unverified")
+            elif native.get("host_visible") is not False or native.get("control_visible") is not False:
+                result.update(state="failed", reason="host_visible")
+            elif native.get("host_focused") is not False or native.get("foreground_interference") is not False:
+                result.update(state="failed", reason="foreground_interference")
     except TimeoutError:
         result.update(state="failed", reason="profile_busy")
     except BridgeError as exc:

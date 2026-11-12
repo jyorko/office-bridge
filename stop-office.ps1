@@ -6,6 +6,8 @@ $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $serverPid"
 if ($proc) {
     $expected = Join-Path $PSScriptRoot 'run_server.py'
     if (-not $proc.CommandLine.Contains($expected)) { throw 'PID was reused; refusing to stop an unrelated process.' }
+    $runtimePython = Join-Path $PSScriptRoot '.runtime\Scripts\python.exe'
+    if (Test-Path -LiteralPath $runtimePython) { & $runtimePython (Join-Path $PSScriptRoot 'stop_teams_session.py') }
     & taskkill.exe /PID $serverPid /T /F | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop the Office Action Server process tree.' }
 }

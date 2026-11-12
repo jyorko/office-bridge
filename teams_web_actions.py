@@ -20,8 +20,10 @@ class TeamsWebStatus(BaseModel):
     host_owned: bool | None = None
     foreground_unchanged: bool | None = None
     foreground_interference: bool | None = None
+    generation: str | None = None
+    restart_required: bool | None = None
     samples: list[dict] | None = None
-    reason: Literal["browser_attachment_denied", "profile_busy", "navigation_failed", "browser_cleanup_failed", "browser_failed", "account_unverified", "host_visible", "foreground_interference", "sdk_unavailable", "timeout", "desktop_operation_failed", "windows_required", "webview2_failed", "bridge_failed", "invalid_bridge_result", "output_overflow"] | None = None
+    reason: Literal["browser_attachment_denied", "profile_busy", "navigation_failed", "browser_cleanup_failed", "browser_failed", "account_unverified", "host_visible", "foreground_interference", "sdk_unavailable", "timeout", "desktop_operation_failed", "windows_required", "webview2_failed", "bridge_failed", "invalid_bridge_result", "output_overflow", "session_unavailable", "session_timeout", "session_disconnected", "host_operation_failed", "host_unavailable", "session_write_failed", "invalid_response"] | None = None
 
 
 @action(is_consequential=False)
@@ -43,9 +45,61 @@ class GroupReceipt(BaseModel):
     time: str
 
 
+class WebSelfReceipt(BaseModel):
+    status: Literal["observed", "already_observed"]
+    chat: Literal["Yorko, Joshua (You)"]
+    message_id: str
+
+
+class WebChatMessage(BaseModel):
+    id: str
+    text: str
+    author: str
+    time: str
+
+
+class WebChatHistory(BaseModel):
+    chat: Literal["QA-ASSIST-VERINT-DEPLOY", "Yorko, Joshua (You)"]
+    scope: Literal["currently_loaded_history"]
+    messages: list[WebChatMessage]
+
+
+def _read_web_chat(operation: str, chat: str, limit: int) -> Response[WebChatHistory]:
+    from desktop_bridge import BridgeError, invoke
+    try:
+        result = invoke(operation, {"limit": limit})
+        if result.get("state") != "read":
+            raise ValueError("unverified")
+        return Response(result=WebChatHistory(chat=chat, scope="currently_loaded_history", messages=result["messages"]))
+    except BridgeError as error:
+        raise ActionError(f"Could not safely read the specified Teams chat: {error.code}.") from None
+    except (KeyError, ValueError):
+        raise ActionError("Could not safely read the specified Teams chat.") from None
+
+
+@action(is_consequential=False)
+def teams_web_read_qa_chat(limit: Annotated[int, Field(ge=1, le=50)] = 20) -> Response[WebChatHistory]:
+    """Read loaded messages from the verified QA-ASSIST-VERINT-DEPLOY chat.
+
+    Args:
+        limit: Maximum loaded messages to return, up to 50.
+    """
+    return _read_web_chat("teams_web_read_group", "QA-ASSIST-VERINT-DEPLOY", limit)
+
+
+@action(is_consequential=False)
+def teams_web_read_self_chat(limit: Annotated[int, Field(ge=1, le=50)] = 20) -> Response[WebChatHistory]:
+    """Read loaded messages from the verified self chat.
+
+    Args:
+        limit: Maximum loaded messages to return, up to 50.
+    """
+    return _read_web_chat("teams_web_read_self", "Yorko, Joshua (You)", limit)
+
+
 @action(is_consequential=True)
 def teams_web_send_qa_chat(body: Annotated[str, Field(min_length=1, max_length=2000)], request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")]) -> Response[GroupReceipt]:
-    """Send a plain-text message to QA-ASSIST-VERINT-DEPLOY exactly once per request ID.
+    """Send a plain-text message to QA-ASSIST-VERINT-DEPLOY at most once per request ID.
 
     Args:
         body: Complete message text, sent only to the specified group chat.
@@ -57,7 +111,6 @@ def teams_web_send_qa_chat(body: Annotated[str, Field(min_length=1, max_length=2
     from pathlib import Path
     import sqlite3
     from desktop_bridge import invoke
-    from install_webview2_sdk import install
 
     path = Path(os.environ["LOCALAPPDATA"]) / "OfficeActionServer" / "teams-web-sends" / "group.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,9 +126,7 @@ def teams_web_send_qa_chat(body: Annotated[str, Field(min_length=1, max_length=2
         db.execute("INSERT INTO sends(id,digest,receipt) VALUES (?,?,NULL)", (request_id, digest))
         db.commit()
     try:
-        with teams_web_backend.profile_lock("webview2"):
-            install()
-            result = invoke("teams_web_send_group", {"body": body})
+        result = invoke("teams_web_send_group", {"body": body, "request_id": request_id})
         if result.get("state") != "observed" or not result.get("message_id") or not result.get("time"):
             raise ValueError("unverified")
         receipt = GroupReceipt(status="observed", chat="QA-ASSIST-VERINT-DEPLOY", message_id=result["message_id"], time=result["time"])
@@ -83,4 +134,29 @@ def teams_web_send_qa_chat(body: Annotated[str, Field(min_length=1, max_length=2
             db.execute("UPDATE sends SET receipt=? WHERE id=?", (receipt.model_dump_json(), request_id))
         return Response(result=receipt)
     except Exception:
+        raise ActionError("Send outcome unknown; inspect the chat before considering any retry.") from None
+
+
+@action(is_consequential=True)
+def teams_web_send_self(body: Annotated[str, Field(min_length=1, max_length=2000)], request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")]) -> Response[WebSelfReceipt]:
+    """Send one message to the verified self chat, with at-most-once request handling.
+
+    Args:
+        body: Complete plain-text message to your own chat.
+        request_id: Unique request ID; uncertain outcomes cannot be retried.
+    """
+    from desktop_bridge import invoke
+    from teams_send_ledger import RECIPIENT, SendLedgerError, send_once
+
+    def submit():
+        result = invoke("teams_web_send_self", {"body": body, "request_id": request_id})
+        if result.get("state") != "observed":
+            raise ValueError("unverified")
+        return {"status": "observed", "message_id": result.get("message_id"),
+                "recipient": RECIPIENT, "account_verified": True, "send_clicked": True}
+
+    try:
+        result = send_once(request_id, body, submit)
+        return Response(result=WebSelfReceipt(status=result["status"], chat="Yorko, Joshua (You)", message_id=result["message_id"]))
+    except (SendLedgerError, KeyError, ValueError):
         raise ActionError("Send outcome unknown; inspect the chat before considering any retry.") from None
