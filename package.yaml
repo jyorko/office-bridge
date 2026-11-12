@@ -1,0 +1,32 @@
+spec-version: v2
+name: desktop-office
+description: Local classic Outlook and Teams desktop tools for the signed-in user.
+version: 0.1.0
+dependencies:
+  conda-forge:
+    - python=3.12.11
+  pypi:
+    - actions-core=1.0.3
+    - pydantic=2.14.3
+    - robocorp-browser=2.4.0
+pythonpath:
+  - .
+dev-dependencies:
+  pypi:
+    - pytest=8.3.3
+dev-tasks:
+  test: python -m pytest tests -q
+packaging:
+  exclude:
+    - ./design/**
+    - ./.venv/**
+    - ./.runtime/**
+    - ./.action-server/**
+    - ./.state/**
+    - ./run_server.py
+    - ./verify_mcp.py
+    - ./register_mcp.py
+    - ./logs/**
+    - ./devdata/**
+    - ./**/__pycache__/**
+    - ./.pytest_cache/**
