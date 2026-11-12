@@ -2,6 +2,7 @@ actions-runtime==1.0.4
 actions-core==1.0.3
 pydantic==2.14.3
 robocorp-browser==2.4.0
-playwright==1.65.1
+# Let robocorp-browser resolve its compatible Playwright dependency.
 pytest==8.3.5
 ruff==0.8.6
+PyYAML==6.0.3

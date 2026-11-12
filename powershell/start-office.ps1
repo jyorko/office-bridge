@@ -1,6 +1,6 @@
 param([switch]$Dev)
 $ErrorActionPreference = 'Stop'
-$taskRoot = $PSScriptRoot
+$taskRoot = Split-Path -Parent $PSScriptRoot
 $stateDir = Join-Path $taskRoot '.state'
 $runtimePython = Join-Path $taskRoot '.runtime\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $runtimePython)) { throw 'The pinned runtime environment is missing.' }
@@ -18,13 +18,10 @@ if ($activeListener) {
     }
     throw 'Port 8766 belongs to another process.'
 }
-$keyFile = Join-Path $stateDir '.api_key'
-if (-not $Dev -and -not (Test-Path -LiteralPath $keyFile)) {
-    $randomBytes = New-Object byte[] 32
-    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($randomBytes) } finally { $rng.Dispose() }
-    [IO.File]::WriteAllText($keyFile, [Convert]::ToBase64String($randomBytes), (New-Object Text.UTF8Encoding $false))
-}
+$prepareArguments = @((Join-Path $taskRoot 'scripts\prepare_state.py'))
+if ($Dev) { $prepareArguments += '--dev' }
+& $runtimePython @prepareArguments
+if ($LASTEXITCODE -ne 0) { throw 'Private device configuration could not be prepared.' }
 $launcher = Join-Path $taskRoot 'scripts\run_server.py'
 $launchArguments = '"' + $launcher + '"'
 if ($Dev) { $launchArguments += ' --dev' }

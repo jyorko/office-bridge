@@ -4,15 +4,17 @@ Local Outlook and Teams actions for Windows, served by the community Actions Run
 
 ## Run
 
-Requires Windows, classic Outlook, WebView2 Runtime, and `uv` on PATH.
+Run from a fresh clone on Windows, under your signed-in work account:
 
 ```powershell
-./setup.ps1
-./.runtime/Scripts/python.exe -m actions.server devenv task install-webview2
-./start-office.ps1
+./bootstrap.ps1 -Dev
 ```
 
-For local development, use `./start-office.ps1 -Dev`. It enables action auto-reload and disables the API key on loopback. Stop with `./stop-office.ps1`.
+Bootstrap installs the Python launcher, prepares RCC with Windows certificate trust, installs the verified WebView2 SDK and any missing WebView2 Runtime, starts the background server, verifies Teams through MCP, and registers the endpoint in Codex. It never sends a test message. Classic Outlook must be installed and configured for Outlook actions.
+
+`-Dev` enables action auto-reload without an API key on loopback. Omit it for authenticated operation. Use `-PrepareOnly` to install prerequisites without starting, or `-SkipCodex` to skip registration. Start and stop an existing installation with `./powershell/start-office.ps1 -Dev` and `./powershell/stop-office.ps1`.
+
+The server runs hidden in your Windows user session. It is not a Windows service or a logon task. Codex connects to that running server; registration does not launch it.
 
 - MCP: `http://127.0.0.1:8766/mcp`
 - Runtime UI: `http://127.0.0.1:8766`
@@ -27,13 +29,17 @@ src/
   desktop_teams_actions.py    Windows UI Automation entrypoints
   teams_actions.py            Persistent background Teams entrypoints
   office_bridge/              Models, bridges, services, runtime helpers, native assets
-scripts/                      Lifecycle, verification, and development tools
-scripts/diagnostics/          Optional browser and workstation diagnostics
+bootstrap.ps1                 Fresh-clone entry point
+powershell/                   Setup, start, stop, and RCC diagnostics
+scripts/                      Python lifecycle, verification, and development tools
+scripts/diagnostics/          Optional browser diagnostics
 tests/                       Offline behavior and isolated browser tests
 docs/                        Architecture, operations, and API reference
 ```
 
 The runtime is served from a generated `.package` containing only `package.yaml` and `src/`. `.state`, `.runtime`, and `.package` are private local/generated directories and are not published.
+
+All WebView2 implementation code is in `src/office_bridge/native/teams/`. Its SDK installer and process supervisor are in `src/office_bridge/runtime/`. Bootstrap recreates generated files from those sources. See [local data](docs/operations.md#local-data) for the separate browser profile and private configuration.
 
 ## Verify
 
@@ -43,7 +49,7 @@ The runtime is served from a generated `.package` containing only `package.yaml`
 ./.runtime/Scripts/python.exe scripts/verify_teams_web.py --dev
 ```
 
-Omit `--dev` for the authenticated server. `scripts/verify_mcp.py` checks authenticated MCP discovery and read-only Outlook/desktop Teams operations. `scripts/register_mcp.py` registers the verified authenticated endpoint while preserving unrelated Codex configuration.
+Omit `--dev` for the authenticated server. `scripts/bootstrap_check.py --dev` verifies MCP discovery, the hidden Teams session, and a self-chat read. `scripts/verify_mcp.py` also checks authenticated Outlook and desktop Teams reads. Registration preserves unrelated Codex configuration.
 
 Sending always requires explicit user authorization. Unknown send outcomes are never automatically retried. Verification does not send messages. See [operations](docs/operations.md) for the separately authorized manual send test, profile configuration, and diagnostics.
 

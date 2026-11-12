@@ -3,6 +3,7 @@
 import os
 import sys
 import threading
+from pathlib import Path
 
 from _bootstrap import ROOT
 from actions.server.cli import main
@@ -13,10 +14,13 @@ STATE = ROOT / ".state"
 
 if __name__ == "__main__":
     os.chdir(ROOT)
+    os.environ.setdefault(
+        "ACTIONS_HOME", str(Path(os.environ["LOCALAPPDATA"]) / "OfficeActionServer/rcc-actions")
+    )
     dev = "--dev" in sys.argv[1:]
     key = "" if dev else (STATE / ".api_key").read_text(encoding="utf-8").strip()
     if not dev and len(key) < 32:
-        raise SystemExit("Missing local API key. Run start-office.ps1 first.")
+        raise SystemExit("Missing local API key. Run powershell/start-office.ps1 first.")
     stage_package()
     if dev:
         threading.Thread(target=watch_sources, daemon=True).start()
