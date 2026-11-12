@@ -1,12 +1,15 @@
 """Synthetic attachment checks; never access Outlook or real mail."""
-from pathlib import Path
+
 import subprocess
+from pathlib import Path
 
 import pytest
 from actions import ActionError
 from pydantic import ValidationError
 
-import attachment_actions as api
+import outlook_actions as api
+from office_bridge import desktop
+from office_bridge.outlook.models import AttachmentDownload
 
 
 def test_download_returns_typed_metadata_and_literal_reference(monkeypatch):
@@ -14,14 +17,29 @@ def test_download_returns_typed_metadata_and_literal_reference(monkeypatch):
 
     def invoke(operation, arguments):
         calls.append((operation, arguments))
-        return {"ref": {key: arguments[key] for key in ("entry_id", "store_id")}, "items": [{"index": 1, "filename": "../invoice.pdf", "size_bytes": 42,
-                 "local_path": r"C:\private\01___invoice.pdf", "sha256": "a" * 64}]}
+        return {
+            "ref": {key: arguments[key] for key in ("entry_id", "store_id")},
+            "items": [
+                {
+                    "index": 1,
+                    "filename": "../invoice.pdf",
+                    "size_bytes": 42,
+                    "local_path": r"C:\private\01___invoice.pdf",
+                    "sha256": "a" * 64,
+                }
+            ],
+        }
 
-    monkeypatch.setattr(api.desktop_bridge, "invoke", invoke)
+    monkeypatch.setattr(desktop, "invoke", invoke)
     response = api.outlook_download_attachments("entry'$(untrusted)", "store")
     assert response.result.items[0].filename == "../invoice.pdf"
     assert response.result.items[0].sha256 == "a" * 64
-    assert calls == [("download_attachments", {"entry_id": "entry'$(untrusted)", "store_id": "store", "pdf_only": False})]
+    assert calls == [
+        (
+            "download_attachments",
+            {"entry_id": "entry'$(untrusted)", "store_id": "store", "pdf_only": False},
+        )
+    ]
     api.outlook_download_attachments("entry", "store", pdf_only=True)
     assert calls[-1][1]["pdf_only"] is True
 
@@ -31,9 +49,9 @@ def test_download_failure_is_reported_once(monkeypatch):
 
     def invoke(*args):
         calls.append(args)
-        raise api.desktop_bridge.BridgeError("attachment_limit_exceeded")
+        raise desktop.BridgeError("attachment_limit_exceeded")
 
-    monkeypatch.setattr(api.desktop_bridge, "invoke", invoke)
+    monkeypatch.setattr(desktop, "invoke", invoke)
     with pytest.raises(ActionError, match="attachment_limit_exceeded"):
         api.outlook_download_attachments("entry", "store")
     assert len(calls) == 1
@@ -41,13 +59,14 @@ def test_download_failure_is_reported_once(monkeypatch):
 
 def test_download_model_rejects_invalid_metadata():
     with pytest.raises(ValidationError):
-        api.AttachmentDownload(index=26, filename="a", size_bytes=-1, local_path="", sha256="bad")
+        AttachmentDownload(index=26, filename="a", size_bytes=-1, local_path="", sha256="bad")
 
 
 def test_powershell_filename_and_limit_boundaries(tmp_path):
-    source = Path(__file__).parents[1] / "powershell" / "attachments.ps1"
+    source = Path(__file__).parents[1] / "src" / "office_bridge" / "native" / "attachments.ps1"
     harness = tmp_path / "synthetic.ps1"
-    harness.write_text(r'''
+    harness.write_text(
+        r"""
 param([string]$SourceFile)
 $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
@@ -74,8 +93,22 @@ Must-Fail {Check-Limits 26 0} 'attachment_limit_exceeded'
 Must-Fail {Check-Limits 1 52428801} 'attachment_limit_exceeded'
 Must-Fail {Check-Limits 1 -1} 'attachment_limit_exceeded'
 Must-Fail {Safe-Name 'x' 0} 'invalid_input'
-''', encoding="utf-8")
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(harness),
-                             "-SourceFile", str(source)], capture_output=True, text=True,
-                            timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(harness),
+            "-SourceFile",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
     assert result.returncode == 0, result.stderr

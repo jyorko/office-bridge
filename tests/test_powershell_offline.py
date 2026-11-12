@@ -1,12 +1,14 @@
 """Run only extracted pure helper functions against synthetic objects, never Office."""
-from pathlib import Path
+
 import subprocess
+from pathlib import Path
 
 
 def test_powershell_identity_version_digest_guards(tmp_path):
-    source = Path(__file__).parents[1] / "powershell" / "office.ps1"
+    source = Path(__file__).parents[1] / "src" / "office_bridge" / "native" / "office.ps1"
     harness = tmp_path / "synthetic.ps1"
-    harness.write_text(r'''
+    harness.write_text(
+        r"""
 param([string]$SourceFile)
 $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
@@ -106,7 +108,22 @@ function Elements($window){return @(
 $bodies=@(Bodies $null)
 if($bodies.Count -ne 1 -or $bodies[0].observed_id -cne 'message-body-123'){throw 'Null UIA ID filtering failed'}
 'synthetic guards passed'
-''', encoding="utf-8")
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(harness), "-SourceFile", str(source)], capture_output=True, text=True, timeout=15)
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(harness),
+            "-SourceFile",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
     assert result.returncode == 0, result.stderr
     assert "synthetic guards passed" in result.stdout

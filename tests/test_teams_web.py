@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import teams_web_backend as backend
+from office_bridge.teams import backend
 
 
 class Locator:
@@ -25,38 +25,66 @@ class Page:
 
 
 def test_classification_requires_application_ready_surface():
-    assert backend._classify(Page("https://teams.cloud.microsoft/"), "teams.cloud.microsoft") == "loading"
-    assert backend._classify(
-        Page("https://teams.cloud.microsoft/", {'[data-tid="app-layout"], [data-tid="app-bar"], [data-tid="chat-list"]'}),
-        "teams.cloud.microsoft",
-    ) == "authenticated"
+    assert (
+        backend._classify(Page("https://teams.cloud.microsoft/"), "teams.cloud.microsoft")
+        == "loading"
+    )
+    assert (
+        backend._classify(
+            Page(
+                "https://teams.cloud.microsoft/",
+                {'[data-tid="app-layout"], [data-tid="app-bar"], [data-tid="chat-list"]'},
+            ),
+            "teams.cloud.microsoft",
+        )
+        == "authenticated"
+    )
 
 
 def test_classification_handles_login_and_access_block():
-    assert backend._classify(Page("https://login.microsoftonline.com/"), "login.microsoftonline.com") == "needs_interactive_login"
-    assert backend._classify(
-        Page("https://teams.cloud.microsoft/", {'[data-tid="unauthorized-page"], [data-tid="error-page"]'}),
-        "teams.cloud.microsoft",
-    ) == "access_blocked"
+    assert (
+        backend._classify(Page("https://login.microsoftonline.com/"), "login.microsoftonline.com")
+        == "needs_interactive_login"
+    )
+    assert (
+        backend._classify(
+            Page(
+                "https://teams.cloud.microsoft/",
+                {'[data-tid="unauthorized-page"], [data-tid="error-page"]'},
+            ),
+            "teams.cloud.microsoft",
+        )
+        == "access_blocked"
+    )
 
 
 def test_status_uses_supported_browser_configuration_and_releases_lock(tmp_path, monkeypatch):
     profile_root = tmp_path / "OfficeActionServer"
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    page = Page("https://teams.cloud.microsoft/", {'[data-tid="app-layout"], [data-tid="app-bar"], [data-tid="chat-list"]'})
+    page = Page(
+        "https://teams.cloud.microsoft/",
+        {'[data-tid="app-layout"], [data-tid="app-bar"], [data-tid="chat-list"]'},
+    )
     calls = []
-    monkeypatch.setattr(backend.browser, "configure", lambda **kwargs: calls.append(("configure", kwargs)))
+    monkeypatch.setattr(
+        backend.browser, "configure", lambda **kwargs: calls.append(("configure", kwargs))
+    )
     monkeypatch.setattr(backend.browser, "page", lambda: page)
     page.context = SimpleNamespace(close=lambda: calls.append(("close", {})))
-    monkeypatch.setattr(page, "goto", lambda *args, **kwargs: calls.append(("goto", (args, kwargs))), raising=False)
+    monkeypatch.setattr(
+        page, "goto", lambda *args, **kwargs: calls.append(("goto", (args, kwargs))), raising=False
+    )
     monkeypatch.setattr(page, "wait_for_timeout", lambda ms: None, raising=False)
 
     assert backend.status()["state"] == "authenticated"
-    assert calls[0] == ("configure", {
-        "browser_engine": "chromium",
-        "headless": True,
-        "persistent_context_directory": str(profile_root / "teams-chromium-profile"),
-    })
+    assert calls[0] == (
+        "configure",
+        {
+            "browser_engine": "chromium",
+            "headless": True,
+            "persistent_context_directory": str(profile_root / "teams-chromium-profile"),
+        },
+    )
     assert backend.status("msedge")["browser_engine"] == "msedge"
     assert calls[-3][1]["persistent_context_directory"] == str(profile_root / "teams-web-profile")
     assert calls[-1][0] == "close"
@@ -65,7 +93,10 @@ def test_status_uses_supported_browser_configuration_and_releases_lock(tmp_path,
 
 def test_profile_mapping_is_fixed_and_engine_specific(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    assert backend.profile_path("chromium") == tmp_path / "OfficeActionServer" / "teams-chromium-profile"
+    assert (
+        backend.profile_path("chromium")
+        == tmp_path / "OfficeActionServer" / "teams-chromium-profile"
+    )
     assert backend.profile_path("msedge") == tmp_path / "OfficeActionServer" / "teams-web-profile"
     try:
         backend.profile_path("arbitrary")
@@ -77,7 +108,10 @@ def test_profile_mapping_is_fixed_and_engine_specific(tmp_path, monkeypatch):
 
 def test_failed_cleanup_cannot_report_authenticated(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    page = Page("https://teams.cloud.microsoft/", {'[data-tid="app-layout"], [data-tid="app-bar"], [data-tid="chat-list"]'})
+    page = Page(
+        "https://teams.cloud.microsoft/",
+        {'[data-tid="app-layout"], [data-tid="app-bar"], [data-tid="chat-list"]'},
+    )
 
     def close():
         raise RuntimeError("browser did not close")
@@ -125,8 +159,18 @@ def test_browser_attachment_denial_is_reported():
     class Session:
         def send(self, method, params=None):
             if method == "Target.getTargets":
-                return {"targetInfos": [{"type": "page", "url": "https://teams.cloud.microsoft/", "targetId": "teams"}]}
-            raise RuntimeError("CDPSession.send: Protocol error (Target.attachToTarget): Not allowed")
+                return {
+                    "targetInfos": [
+                        {
+                            "type": "page",
+                            "url": "https://teams.cloud.microsoft/",
+                            "targetId": "teams",
+                        }
+                    ]
+                }
+            raise RuntimeError(
+                "CDPSession.send: Protocol error (Target.attachToTarget): Not allowed"
+            )
 
         def detach(self):
             calls.append("detached")
@@ -142,8 +186,18 @@ def test_status_preserves_edge_attachment_denial_diagnosis(tmp_path, monkeypatch
     class Session:
         def send(self, method, params=None):
             if method == "Target.getTargets":
-                return {"targetInfos": [{"type": "page", "url": "https://teams.cloud.microsoft/", "targetId": "teams"}]}
-            raise RuntimeError("CDPSession.send: Protocol error (Target.attachToTarget): Not allowed")
+                return {
+                    "targetInfos": [
+                        {
+                            "type": "page",
+                            "url": "https://teams.cloud.microsoft/",
+                            "targetId": "teams",
+                        }
+                    ]
+                }
+            raise RuntimeError(
+                "CDPSession.send: Protocol error (Target.attachToTarget): Not allowed"
+            )
 
         def detach(self):
             pass
@@ -156,7 +210,12 @@ def test_status_preserves_edge_attachment_denial_diagnosis(tmp_path, monkeypatch
     page.context = context
     monkeypatch.setattr(backend.browser, "configure", lambda **kwargs: None)
     monkeypatch.setattr(backend.browser, "page", lambda: page)
-    monkeypatch.setattr(page, "goto", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("navigation detached")), raising=False)
+    monkeypatch.setattr(
+        page,
+        "goto",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("navigation detached")),
+        raising=False,
+    )
     result = backend.status("msedge")
     assert result["state"] == "access_blocked"
     assert result["browser_engine"] == "msedge"
@@ -165,20 +224,26 @@ def test_status_preserves_edge_attachment_denial_diagnosis(tmp_path, monkeypatch
 
 def test_webview2_status_routes_through_persistent_session_bridge(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    import desktop_bridge
+    from office_bridge import desktop
 
     calls = []
 
     def invoke(operation, arguments):
         calls.append((operation, arguments))
         return {
-            "state": "needs_interactive_login", "hostname": "login.microsoftonline.com",
-            "path": "/", "backend": "webview2", "account_verified": False,
-            "host_visible": False, "control_visible": False, "host_focused": False,
-            "host_owned": True, "foreground_unchanged": True,
+            "state": "needs_interactive_login",
+            "hostname": "login.microsoftonline.com",
+            "path": "/",
+            "backend": "webview2",
+            "account_verified": False,
+            "host_visible": False,
+            "control_visible": False,
+            "host_focused": False,
+            "host_owned": True,
+            "foreground_unchanged": True,
         }
 
-    monkeypatch.setattr(desktop_bridge, "invoke", invoke)
+    monkeypatch.setattr(desktop, "invoke", invoke)
     result = backend.backend_status("webview2")
     assert result["backend"] == "webview2"
     assert result["state"] == "needs_interactive_login"
@@ -189,24 +254,40 @@ def test_webview2_status_routes_through_persistent_session_bridge(tmp_path, monk
 
 def test_webview2_never_reports_unverified_or_interfering_authentication(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    import desktop_bridge
-    import install_webview2_sdk
+    from office_bridge import desktop
 
-    monkeypatch.setattr(install_webview2_sdk, "install", lambda: None)
-    monkeypatch.setattr(desktop_bridge, "invoke", lambda *_: {
-        "state": "authenticated", "hostname": "teams.cloud.microsoft", "path": "/",
-        "account_verified": False, "host_visible": False, "control_visible": False,
-        "host_focused": False, "foreground_unchanged": True,
-    })
+    monkeypatch.setattr(
+        desktop,
+        "invoke",
+        lambda *_: {
+            "state": "authenticated",
+            "hostname": "teams.cloud.microsoft",
+            "path": "/",
+            "account_verified": False,
+            "host_visible": False,
+            "control_visible": False,
+            "host_focused": False,
+            "foreground_unchanged": True,
+        },
+    )
     result = backend.backend_status("webview2")
     assert result["state"] == "failed"
     assert result["reason"] == "account_unverified"
 
-    monkeypatch.setattr(desktop_bridge, "invoke", lambda *_: {
-        "state": "authenticated", "hostname": "teams.cloud.microsoft", "path": "/",
-        "account_verified": True, "host_visible": True, "control_visible": False,
-        "host_focused": False, "foreground_unchanged": True,
-    })
+    monkeypatch.setattr(
+        desktop,
+        "invoke",
+        lambda *_: {
+            "state": "authenticated",
+            "hostname": "teams.cloud.microsoft",
+            "path": "/",
+            "account_verified": True,
+            "host_visible": True,
+            "control_visible": False,
+            "host_focused": False,
+            "foreground_unchanged": True,
+        },
+    )
     result = backend.backend_status("webview2")
     assert result["state"] == "failed"
     assert result["reason"] == "host_visible"
@@ -214,16 +295,20 @@ def test_webview2_never_reports_unverified_or_interfering_authentication(tmp_pat
 
 def test_webview2_distinguishes_user_window_switches_from_owned_focus(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    import desktop_bridge
-    import install_webview2_sdk
+    from office_bridge import desktop
 
-    monkeypatch.setattr(install_webview2_sdk, "install", lambda: None)
     result = {
-        "state": "authenticated", "hostname": "teams.cloud.microsoft", "path": "/",
-        "account_verified": True, "host_visible": False, "control_visible": False,
-        "host_focused": False, "foreground_interference": False, "foreground_unchanged": False,
+        "state": "authenticated",
+        "hostname": "teams.cloud.microsoft",
+        "path": "/",
+        "account_verified": True,
+        "host_visible": False,
+        "control_visible": False,
+        "host_focused": False,
+        "foreground_interference": False,
+        "foreground_unchanged": False,
     }
-    monkeypatch.setattr(desktop_bridge, "invoke", lambda *_: dict(result))
+    monkeypatch.setattr(desktop, "invoke", lambda *_: dict(result))
     assert backend.backend_status("webview2")["state"] == "authenticated"
     result["foreground_interference"] = True
     assert backend.backend_status("webview2")["state"] == "failed"

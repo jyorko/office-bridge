@@ -1,0 +1,34 @@
+# Package architecture
+
+## Public actions
+
+`src/outlook_actions.py`, `src/desktop_teams_actions.py`, and `src/teams_actions.py` contain typed entrypoints. Action names and input/output schemas remain the public contract. They import models and operations from `office_bridge`; action modules do not import one another.
+
+`office_bridge/outlook/models.py` contains Outlook schemas. `office_bridge/teams/models.py` contains desktop and web Teams schemas. Shared boundary constraints live in `office_bridge/models.py`.
+
+## Implementations
+
+- `office_bridge/desktop.py` invokes fixed, bounded PowerShell JSON-file adapters. The Outlook bridge preserves EntryID/StoreID identity and version checks. Teams desktop navigation refuses to take foreground focus.
+- `office_bridge/teams/service.py` owns background reads and send reservations. The existing group SQLite ledger and self-send ledger retain their locations and unknown-outcome behavior.
+- `office_bridge/teams/session.py` is the bounded named-pipe client for the launcher-owned Teams host.
+- `office_bridge/teams/backend.py` validates WebView2 status and retains optional Chromium/Edge diagnostics.
+- `office_bridge/runtime/supervisor.py` owns the hidden host lifecycle. `runtime/sdk.py` verifies the pinned SDK archive and DLL hashes.
+- `office_bridge/native/` holds the PowerShell, C#, and browser assets next to the Python implementation that uses them.
+
+## Persistent Teams session
+
+The launcher starts one hidden WebView2 host before disposable Action Server workers. Its STA message loop keeps the controller alive between calls. The host owns the persistent-profile lock and serializes local named-pipe requests. It is not a separate HTTP or MCP server.
+
+The host uses the existing Windows account SSO and dedicated profile. Teams refreshes that profile's own authentication; normal browser cookies are not copied. Authentication challenges are reported rather than bypassed.
+
+Workers can be replaced without replacing the browser. Native and selector scripts are loaded once per host generation. Changes set `restart_required`; restart the server to apply them. The supervisor limits crash restarts, and stop-office requests graceful host shutdown before terminating the verified server tree.
+
+All browser work is confined to the isolated session. Its containing window is never shown or activated. Popups and external app launches are blocked; the host checks for owned foreground interference. Browser-scoped input does not use the desktop keyboard or clipboard.
+
+## Packaging and development
+
+`package.yaml` declares pinned RCC worker dependencies and `pythonpath: src`. `scripts/requirements-dev.txt` pins the separate launcher/development environment installed by `setup.ps1`.
+
+`scripts/package_layout.py` derives staged files from `src/` and `package.yaml`. It excludes generated caches and never enumerates `.runtime` or private state as package input. It removes retired staged sources and copies only changed files. Development watching covers `src/` recursively, including added and removed files.
+
+The full schema snapshot is maintained with `python scripts/export_openapi.py`. Tests exercise behavior rather than depending on the old flat module layout.

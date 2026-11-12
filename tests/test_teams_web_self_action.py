@@ -1,17 +1,20 @@
 import pytest
 from actions import ActionError
-import desktop_bridge
-import teams_send_ledger
-import teams_web_actions as actions
+
+import teams_actions as actions
+from office_bridge import desktop
+from office_bridge.teams import ledger
 
 
 def test_self_message_is_sent_once_per_request(tmp_path, monkeypatch):
-    monkeypatch.setattr(teams_send_ledger, "LEDGER_PATH", tmp_path / "self-ledger.json")
+    monkeypatch.setattr(ledger, "LEDGER_PATH", tmp_path / "self-ledger.json")
     calls = []
+
     def invoke(operation, arguments):
         calls.append((operation, arguments))
         return {"state": "observed", "message_id": "message-body-1794510375584"}
-    monkeypatch.setattr(desktop_bridge, "invoke", invoke)
+
+    monkeypatch.setattr(desktop, "invoke", invoke)
     first = actions.teams_web_send_self("hello", "self-1")
     second = actions.teams_web_send_self("hello", "self-1")
     assert first.result.status == "observed"
@@ -21,12 +24,14 @@ def test_self_message_is_sent_once_per_request(tmp_path, monkeypatch):
 
 
 def test_unknown_self_send_is_not_retried(tmp_path, monkeypatch):
-    monkeypatch.setattr(teams_send_ledger, "LEDGER_PATH", tmp_path / "self-ledger.json")
+    monkeypatch.setattr(ledger, "LEDGER_PATH", tmp_path / "self-ledger.json")
     calls = []
+
     def invoke(operation, arguments):
         calls.append(operation)
-        raise desktop_bridge.BridgeError("mutation_outcome_unknown")
-    monkeypatch.setattr(desktop_bridge, "invoke", invoke)
+        raise desktop.BridgeError("mutation_outcome_unknown")
+
+    monkeypatch.setattr(desktop, "invoke", invoke)
     for _ in range(2):
         with pytest.raises(ActionError):
             actions.teams_web_send_self("hello", "self-2")

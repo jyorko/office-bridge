@@ -1,6 +1,6 @@
 spec-version: v2
 name: desktop-office
-description: Local classic Outlook and Teams desktop tools for the signed-in user.
+description: Local Outlook actions and isolated background Teams automation.
 version: 0.1.0
 dependencies:
   conda-forge:
@@ -11,27 +11,31 @@ dependencies:
     - robocorp-browser=2.4.0
     - playwright=1.65.1
 pythonpath:
-  - .
+  - src
 dev-dependencies:
   pypi:
-    - pytest=8.3.3
+    - pytest=8.3.5
+    - ruff=0.8.6
 dev-tasks:
   test: python -m pytest tests -q
+  lint: ruff check src scripts tests
+  format: ruff format src scripts tests
   install-browser: python -c "from robocorp import browser; browser.install('chromium')"
-  install-webview2: python install_webview2_sdk.py
+  install-webview2: python -m office_bridge.runtime.sdk
 packaging:
   exclude:
+    - ./.git/**
+    - ./docs/**
+    - ./scripts/**
+    - ./tests/**
     - ./design/**
     - ./.venv/**
     - ./.runtime/**
     - ./.package/**
     - ./.action-server/**
     - ./.state/**
-    - ./run_server.py
-    - ./verify_mcp.py
-    - ./verify_teams_web.py
-    - ./register_mcp.py
     - ./logs/**
     - ./devdata/**
     - ./**/__pycache__/**
     - ./.pytest_cache/**
+    - ./.ruff_cache/**

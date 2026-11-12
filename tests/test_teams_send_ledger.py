@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-import teams_send_ledger as ledger
+from office_bridge.teams import ledger
 
 
 def use_tmp_ledger(tmp_path, monkeypatch):
@@ -22,14 +22,24 @@ def test_observed_send_is_durable_and_replay_does_not_submit(tmp_path, monkeypat
         assert entry["status"] == "attempted"
         assert "private body" not in path.read_text(encoding="utf-8")
         return {
-            "status": "observed", "send_clicked": True,
-            "message_id": "msg-123", "recipient": ledger.RECIPIENT,
-            "account_verified": True, "body": "must not persist", "debug": "secret",
+            "status": "observed",
+            "send_clicked": True,
+            "message_id": "msg-123",
+            "recipient": ledger.RECIPIENT,
+            "account_verified": True,
+            "body": "must not persist",
+            "debug": "secret",
         }
 
     first = ledger.send_once("case-1", "private body", submit)
     second = ledger.send_once("case-1", "private body", submit)
-    assert first == {"status": "observed", "message_id": "msg-123", "recipient": ledger.RECIPIENT, "account_verified": True, "send_clicked": True}
+    assert first == {
+        "status": "observed",
+        "message_id": "msg-123",
+        "recipient": ledger.RECIPIENT,
+        "account_verified": True,
+        "send_clicked": True,
+    }
     assert second["status"] == "already_observed"
     assert second["message_id"] == "msg-123"
     assert calls == [1]
@@ -73,25 +83,43 @@ def test_only_explicit_untouched_not_sent_allows_later_explicit_call(tmp_path, m
         return {"status": "not_sent", "send_clicked": False, "composer_unchanged": True}
 
     assert ledger.send_once("key", "body", proven_preflight)["status"] == "not_sent"
-    observed = ledger.send_once("key", "body", lambda: calls.append("submit") or {
-        "status": "observed", "send_clicked": True, "message_id": "id-1",
-    })
+    observed = ledger.send_once(
+        "key",
+        "body",
+        lambda: calls.append("submit")
+        or {
+            "status": "observed",
+            "send_clicked": True,
+            "message_id": "id-1",
+        },
+    )
     assert observed["status"] == "observed"
     assert calls == ["preflight", "submit"]
 
 
-@pytest.mark.parametrize("result", [
-    {"status": "outcome_unknown", "send_clicked": False},
-    {"status": "not_sent", "send_clicked": True, "composer_unchanged": True},
-    {"status": "not_sent", "send_clicked": False, "composer_unchanged": False},
-    {"status": "observed", "send_clicked": True},
-    {"status": "observed", "send_clicked": True, "message_id": "id", "account_verified": False},
-    {"status": "observed", "send_clicked": True, "message_id": "id", "recipient": "someone-else@example.com"},
-])
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"status": "outcome_unknown", "send_clicked": False},
+        {"status": "not_sent", "send_clicked": True, "composer_unchanged": True},
+        {"status": "not_sent", "send_clicked": False, "composer_unchanged": False},
+        {"status": "observed", "send_clicked": True},
+        {"status": "observed", "send_clicked": True, "message_id": "id", "account_verified": False},
+        {
+            "status": "observed",
+            "send_clicked": True,
+            "message_id": "id",
+            "recipient": "someone-else@example.com",
+        },
+    ],
+)
 def test_unproven_results_fail_closed(tmp_path, monkeypatch, result):
     use_tmp_ledger(tmp_path, monkeypatch)
     calls = []
-    assert ledger.send_once("key", "body", lambda: calls.append(1) or result)["status"] == "outcome_unknown"
+    assert (
+        ledger.send_once("key", "body", lambda: calls.append(1) or result)["status"]
+        == "outcome_unknown"
+    )
     with pytest.raises(ledger.SendLedgerError) as exc:
         ledger.send_once("key", "body", lambda: calls.append(2))
     assert str(exc.value) == "send_outcome_unknown"

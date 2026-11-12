@@ -1,0 +1,123 @@
+"""Desktop and background Teams request/response schemas."""
+
+from datetime import datetime
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from office_bridge.models import Identifier, Model
+
+
+class ChatRef(Model):
+    snapshot_id: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    exact_tree_label: Identifier
+    window_title: Identifier
+
+
+class ChatSummary(Model):
+    ref: ChatRef
+    display_name: str
+
+
+class ChatPage(Model):
+    items: list[ChatSummary]
+    scope: Literal["currently_loaded_chat_list"]
+    captured_at: datetime
+    truncated: bool
+
+
+class ChatMessage(Model):
+    observed_id: str
+    text: str
+
+
+class ChatHistory(Model):
+    chat: ChatRef
+    messages: list[ChatMessage]
+    scope: Literal["currently_loaded_history"]
+    captured_at: datetime
+    truncated: bool
+
+
+class SelfMessageReceipt(Model):
+    recipient_email: str
+    chat_name: Literal["Yorko, Joshua (You)"]
+    status: Literal["observed"]
+    observed_id: str
+    body_digest: str
+    submitted_at: datetime
+
+
+class TeamsWebStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    state: Literal[
+        "authenticated", "needs_interactive_login", "access_blocked", "loading", "failed"
+    ]
+    hostname: str
+    path: str
+    browser_engine: Literal["chromium", "msedge", "webview2"]
+    backend: Literal["chromium", "msedge", "webview2"]
+    account_verified: bool | None = None
+    host_visible: bool | None = None
+    control_visible: bool | None = None
+    host_focused: bool | None = None
+    host_owned: bool | None = None
+    foreground_unchanged: bool | None = None
+    foreground_interference: bool | None = None
+    generation: str | None = None
+    restart_required: bool | None = None
+    samples: list[dict] | None = None
+    reason: (
+        Literal[
+            "browser_attachment_denied",
+            "profile_busy",
+            "navigation_failed",
+            "browser_cleanup_failed",
+            "browser_failed",
+            "account_unverified",
+            "host_visible",
+            "foreground_interference",
+            "sdk_unavailable",
+            "timeout",
+            "desktop_operation_failed",
+            "windows_required",
+            "webview2_failed",
+            "bridge_failed",
+            "invalid_bridge_result",
+            "output_overflow",
+            "session_unavailable",
+            "session_timeout",
+            "session_disconnected",
+            "host_operation_failed",
+            "host_unavailable",
+            "session_write_failed",
+            "invalid_response",
+        ]
+        | None
+    ) = None
+
+
+class GroupReceipt(BaseModel):
+    status: Literal["observed", "already_observed"]
+    chat: Literal["QA-ASSIST-VERINT-DEPLOY"]
+    message_id: str
+    time: str
+
+
+class WebSelfReceipt(BaseModel):
+    status: Literal["observed", "already_observed"]
+    chat: Literal["Yorko, Joshua (You)"]
+    message_id: str
+
+
+class WebChatMessage(BaseModel):
+    id: str
+    text: str
+    author: str
+    time: str
+
+
+class WebChatHistory(BaseModel):
+    chat: Literal["QA-ASSIST-VERINT-DEPLOY", "Yorko, Joshua (You)"]
+    scope: Literal["currently_loaded_history"]
+    messages: list[WebChatMessage]

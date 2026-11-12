@@ -4,18 +4,28 @@ import zipfile
 
 import pytest
 
-import install_webview2_sdk as sdk
+from office_bridge.runtime import sdk
 
 
 def package_fixture(monkeypatch):
-    payloads = {member: (name, b"test SDK payload: " + name.encode()) for member, (name, _) in sdk.FILES.items()}
+    payloads = {
+        member: (name, b"test SDK payload: " + name.encode())
+        for member, (name, _) in sdk.FILES.items()
+    }
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as bundle:
         for member, (_, content) in payloads.items():
             bundle.writestr(member, content)
         bundle.writestr("../outside.txt", b"must not be extracted")
     data = archive.getvalue()
-    monkeypatch.setattr(sdk, "FILES", {member: (name, hashlib.sha256(content).hexdigest()) for member, (name, content) in payloads.items()})
+    monkeypatch.setattr(
+        sdk,
+        "FILES",
+        {
+            member: (name, hashlib.sha256(content).hexdigest())
+            for member, (name, content) in payloads.items()
+        },
+    )
     monkeypatch.setattr(sdk, "PACKAGE_SHA256", hashlib.sha256(data).hexdigest())
     monkeypatch.setattr(sdk, "_context", lambda: None)
     monkeypatch.setattr(sdk.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(data))
