@@ -16,6 +16,7 @@
 - Start: `./powershell/start-office.ps1 -Dev`. Stop: `./powershell/stop-office.ps1`. Inspect the recorded process and listener before changing an existing server. Do not launch duplicate servers or silently rotate keys.
 - The server runs hidden in the signed-in Windows user session at `http://127.0.0.1:8766/`. MCP is `/mcp`, and the full API schema is `/openapi.json`. Codex registration connects to it; it does not start the process.
 - Disposable Actions Runtime workers connect to the launcher-owned persistent Teams host. Worker replacement must not replace the browser or replay a request.
+- Reload changed native Teams code with `scripts/restart_teams_session.py`, then verify readiness. The server UI stays running; the supervisor's bounded restart policy still applies.
 
 ## Private data and desktop protection
 

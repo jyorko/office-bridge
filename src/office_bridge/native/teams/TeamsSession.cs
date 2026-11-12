@@ -51,9 +51,10 @@ public sealed class TeamsSession : ApplicationContext
       const dialog=document.querySelector('[data-tid=me-control-menu-dialog]');
       const menu=dialog && dialog.querySelector('[data-tid=me-control-menu]');
       const emails=menu ? Array.from(new Set((menu.innerText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)||[]).map(e=>e.toLowerCase()))) : [];
-      const name=menu && menu.querySelector('[data-tid=me-control-display-name]')?.textContent.trim() || '';
+      const name=dialog && dialog.querySelector('[data-tid=me-control-displayname]')?.textContent.trim() || '';
       const verified=!!dialog && dialog.getAttribute('role')==='dialog' && dialog.getAttribute('aria-label')==='Profile menu' && !!menu && menu.getAttribute('role')==='menu' && !!dialog.querySelector('[data-tid=me-control-sign-out-button]') && emails.length===1 && emails[0]===__EXPECTED_ACCOUNT__;
-      return {hostname:location.hostname,path:location.pathname,app:!!document.querySelector('[data-tid=experience-layout]') && !!document.querySelector('[data-tid=me-control-avatar-trigger]'),login:!!document.querySelector('input[type=email],input[name=loginfmt],input[type=password]'),blocked:!!document.querySelector('[data-tid=unauthorized-page],[data-tid=error-page]'),account_verified:verified,account_name:name};
+      const fields=dialog ? Array.from(dialog.querySelectorAll('[data-tid]')).map(e=>e.getAttribute('data-tid')).slice(0,30) : [];
+      return {hostname:location.hostname,path:location.pathname,app:!!document.querySelector('[data-tid=experience-layout]') && !!document.querySelector('[data-tid=me-control-avatar-trigger]'),login:!!document.querySelector('input[type=email],input[name=loginfmt],input[type=password]'),blocked:!!document.querySelector('[data-tid=unauthorized-page],[data-tid=error-page]'),account_verified:verified,account_name:name,profile_fields:fields};
     })()";
 
     TeamsSession(string sdkPath, string profilePath, string pipe, string gen, int parent)
@@ -184,6 +185,7 @@ public sealed class TeamsSession : ApplicationContext
         IntPtr initialForeground = GetForegroundWindow();
         string state = error, hostname = "teams.cloud.microsoft", path = "/";
         bool account = false;
+        var samples = new List<Dictionary<string, object>>();
         if (host.Visible || OwnedForeground())
             interference = true;
         if (controller != null && !interference && error != "browser_failed")
@@ -202,6 +204,14 @@ public sealed class TeamsSession : ApplicationContext
                     "document.querySelector('[data-tid=me-control-avatar-trigger]')?.click(); " +
                     "})()");
                 page = await Inspect();
+                object fields;
+                if (page.TryGetValue("profile_fields", out fields))
+                {
+                    samples.Add(new Dictionary<string, object> {
+                        { "account_email_verified", Flag(page, "account_verified") },
+                        { "profile_fields", fields }
+                    });
+                }
                 string profileName = Convert.ToString(page["account_name"]);
                 account = Flag(page, "account_verified") && !String.IsNullOrWhiteSpace(profileName);
                 if (account) currentAccountName = profileName;
@@ -250,6 +260,7 @@ public sealed class TeamsSession : ApplicationContext
                                                   initialForeground == GetForegroundWindow() },
                                                 { "generation", generation },
                                                 { "restart_required", restartRequired },
+                                                { "samples", samples.Count > 0 && !account ? samples : null },
                                                 { "reason", reason } };
     }
     async Task<Dictionary<string, object>> Dispatch(Dictionary<string, object> request)
@@ -323,8 +334,8 @@ public sealed class TeamsSession : ApplicationContext
             string state = Convert.ToString(result["state"]);
             if (state == "listed")
             {
-                var items = result["items"] as object[];
-                if (items == null || items.Length > limit)
+                var items = result["items"] as System.Collections.IList;
+                if (items == null || items.Count > limit)
                     throw new InvalidOperationException();
                 foreach (var item in items)
                 {

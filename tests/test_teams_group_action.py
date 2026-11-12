@@ -12,7 +12,7 @@ CHAT = WebChatRef(chat_id=CHAT_ID, title="Example Group")
 
 def setup_send(tmp_path, monkeypatch, invoke):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    monkeypatch.setenv("OFFICE_TEAMS_EXPECTED_ACCOUNT", "person@example.invalid")
+    monkeypatch.setenv("OFFICE_BRIDGE_ACCOUNT", "person@example.invalid")
     monkeypatch.setattr(ledger, "LEDGER_PATH", tmp_path / "legacy-self-ledger.json")
     monkeypatch.setattr(desktop, "invoke", invoke)
 
@@ -26,6 +26,8 @@ def test_observed_receipt_reuses_only_same_destination(tmp_path, monkeypatch):
             "state": "observed",
             "message_id": "message-body-123",
             "time": "2026-11-12T19:00:00Z",
+            "chat_id": CHAT.chat_id,
+            "title": CHAT.title,
         }
 
     setup_send(tmp_path, monkeypatch, invoke)
@@ -68,3 +70,23 @@ def test_legacy_self_send_id_is_never_reused(tmp_path, monkeypatch):
     )
     with pytest.raises(ActionError):
         actions.teams_web_send_chat(CHAT, "new body", "legacy-1")
+
+
+def test_wrong_destination_receipt_blocks_any_repeat(tmp_path, monkeypatch):
+    calls = []
+
+    def invoke(operation, arguments):
+        calls.append(operation)
+        return {
+            "state": "observed",
+            "message_id": "message-body-123",
+            "time": "2026-11-12T19:00:00Z",
+            "chat_id": "19:" + "b" * 32 + "@thread.v2",
+            "title": CHAT.title,
+        }
+
+    setup_send(tmp_path, monkeypatch, invoke)
+    for _ in range(2):
+        with pytest.raises(ActionError):
+            actions.teams_web_send_chat(CHAT, "test", "wrong-destination")
+    assert calls == ["teams_web_send_chat"]

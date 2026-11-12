@@ -107,6 +107,8 @@ def send_chat(chat: WebChatRef, body: str, request_id: str) -> GroupReceipt:
             result.get("state") != "observed"
             or not result.get("message_id")
             or not result.get("time")
+            or result.get("chat_id") != chat.chat_id
+            or result.get("title") != chat.title
         ):
             raise ValueError("unverified")
         receipt = GroupReceipt(

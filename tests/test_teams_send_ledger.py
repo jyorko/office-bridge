@@ -6,7 +6,7 @@ from office_bridge.teams import ledger
 
 
 def use_tmp_ledger(tmp_path, monkeypatch):
-    monkeypatch.setenv("OFFICE_TEAMS_EXPECTED_ACCOUNT", "person@example.invalid")
+    monkeypatch.setenv("OFFICE_BRIDGE_ACCOUNT", "person@example.invalid")
     path = tmp_path / "OfficeActionServer" / "teams-web-sends" / "ledger.json"
     monkeypatch.setattr(ledger, "LEDGER_PATH", path)
     return path

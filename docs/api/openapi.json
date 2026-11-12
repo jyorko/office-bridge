@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Actions Runtime",
-    "version": "1.0.4"
+    "version": "1.1.0"
   },
   "servers": [
     {
@@ -1939,121 +1939,6 @@
         "x-operation-kind": "tool"
       }
     },
-    "/api/actions/desktop-office/teams-send-self-message/run": {
-      "post": {
-        "summary": "Teams Send Self Message",
-        "description": "Send one message only to the signed-in company user's self chat, then observe it. Requires explicit user authorization. Never automatically retry an uncertain result.",
-        "operationId": "teams_send_self_message",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "body_text": {
-                    "type": "string",
-                    "title": "Body Text",
-                    "description": "Plain-text self-chat message, from 1 to 2000 characters."
-                  }
-                },
-                "type": "object",
-                "required": [
-                  "body_text"
-                ]
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "result": {
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "recipient_email": {
-                              "type": "string",
-                              "title": "Recipient Email"
-                            },
-                            "chat_name": {
-                              "type": "string",
-                              "const": "Yorko, Joshua (You)",
-                              "title": "Chat Name"
-                            },
-                            "status": {
-                              "type": "string",
-                              "const": "observed",
-                              "title": "Status"
-                            },
-                            "observed_id": {
-                              "type": "string",
-                              "title": "Observed Id"
-                            },
-                            "body_digest": {
-                              "type": "string",
-                              "title": "Body Digest"
-                            },
-                            "submitted_at": {
-                              "type": "string",
-                              "format": "date-time",
-                              "title": "Submitted At"
-                            }
-                          },
-                          "additionalProperties": false,
-                          "type": "object",
-                          "required": [
-                            "recipient_email",
-                            "chat_name",
-                            "status",
-                            "observed_id",
-                            "body_digest",
-                            "submitted_at"
-                          ],
-                          "title": "SelfMessageReceipt"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The result for the action if it ran successfully"
-                    },
-                    "error": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "title": "Error",
-                      "description": "The error message if the action failed for some reason"
-                    }
-                  },
-                  "type": "object",
-                  "title": "Response for Teams Send Self Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "x-operation-kind": "tool"
-      }
-    },
     "/api/actions/desktop-office/outlook-download-attachments/run": {
       "post": {
         "summary": "Outlook Download Attachments",
@@ -2493,119 +2378,6 @@
           }
         },
         "x-openai-isConsequential": false,
-        "x-operation-kind": "action"
-      }
-    },
-    "/api/actions/desktop-office/teams-web-send-qa-chat/run": {
-      "post": {
-        "summary": "Teams Web Send Qa Chat",
-        "description": "Send a plain-text message to QA-ASSIST-VERINT-DEPLOY at most once per request ID.",
-        "operationId": "teams_web_send_qa_chat",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "body": {
-                    "type": "string",
-                    "title": "Body",
-                    "description": "Complete message text, sent only to the specified group chat."
-                  },
-                  "request_id": {
-                    "type": "string",
-                    "title": "Request Id",
-                    "description": "Unique request ID; uncertain outcomes cannot be retried."
-                  }
-                },
-                "type": "object",
-                "required": [
-                  "body",
-                  "request_id"
-                ]
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "result": {
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "observed",
-                                "already_observed"
-                              ],
-                              "title": "Status"
-                            },
-                            "chat": {
-                              "type": "string",
-                              "const": "QA-ASSIST-VERINT-DEPLOY",
-                              "title": "Chat"
-                            },
-                            "message_id": {
-                              "type": "string",
-                              "title": "Message Id"
-                            },
-                            "time": {
-                              "type": "string",
-                              "title": "Time"
-                            }
-                          },
-                          "type": "object",
-                          "required": [
-                            "status",
-                            "chat",
-                            "message_id",
-                            "time"
-                          ],
-                          "title": "GroupReceipt"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The result for the action if it ran successfully"
-                    },
-                    "error": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "title": "Error",
-                      "description": "The error message if the action failed for some reason"
-                    }
-                  },
-                  "type": "object",
-                  "title": "Response for Teams Web Send Qa Chat"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "x-openai-isConsequential": true,
         "x-operation-kind": "action"
       }
     },
@@ -5512,20 +5284,341 @@
         }
       }
     },
-    "/api/actions/desktop-office/teams-web-send-self/run": {
+    "/api/actions/desktop-office/teams-web-list-chats/run": {
       "post": {
-        "summary": "Teams Web Send Self",
-        "description": "Send one message to the verified self chat, with at-most-once request handling.",
-        "operationId": "teams_web_send_self",
+        "summary": "Teams Web List Chats",
+        "description": "List verified references in the currently loaded Teams chat list.",
+        "operationId": "teams_web_list_chats",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Name",
+                    "description": "Optional exact chat title filter."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "title": "Limit",
+                    "description": "Maximum references to return, up to 100.",
+                    "default": 100
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "items": {
+                              "items": {
+                                "properties": {
+                                  "chat_id": {
+                                    "type": "string",
+                                    "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                                    "title": "Chat Id"
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "title": "Title"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "type": "object",
+                                "required": [
+                                  "chat_id",
+                                  "title"
+                                ],
+                                "title": "WebChatRef"
+                              },
+                              "type": "array",
+                              "title": "Items"
+                            },
+                            "scope": {
+                              "type": "string",
+                              "const": "currently_loaded_chat_list",
+                              "title": "Scope"
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "title": "Truncated"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "items",
+                            "scope",
+                            "truncated"
+                          ],
+                          "title": "WebChatSearchResult"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web List Chats"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-read-chat/run": {
+      "post": {
+        "summary": "Teams Web Read Chat",
+        "description": "Read loaded history from the verified exact chat reference.",
+        "operationId": "teams_web_read_chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by teams_web_list_chats."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "title": "Limit",
+                    "description": "Maximum loaded messages to return, up to 50.",
+                    "default": 20
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "scope": {
+                              "type": "string",
+                              "const": "currently_loaded_history",
+                              "title": "Scope"
+                            },
+                            "messages": {
+                              "items": {
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "title": "Id"
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "title": "Text"
+                                  },
+                                  "author": {
+                                    "type": "string",
+                                    "title": "Author"
+                                  },
+                                  "time": {
+                                    "type": "string",
+                                    "title": "Time"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "id",
+                                  "text",
+                                  "author",
+                                  "time"
+                                ],
+                                "title": "WebChatMessage"
+                              },
+                              "type": "array",
+                              "title": "Messages"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "chat",
+                            "scope",
+                            "messages"
+                          ],
+                          "title": "WebChatHistory"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Read Chat"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-send-chat/run": {
+      "post": {
+        "summary": "Teams Web Send Chat",
+        "description": "Send one message to the verified exact chat reference at most once per request ID.",
+        "operationId": "teams_web_send_chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by teams_web_list_chats."
+                  },
                   "body": {
                     "type": "string",
                     "title": "Body",
-                    "description": "Complete plain-text message to your own chat."
+                    "description": "Complete plain-text message, sent only to the referenced chat."
                   },
                   "request_id": {
                     "type": "string",
@@ -5535,6 +5628,7 @@
                 },
                 "type": "object",
                 "required": [
+                  "chat",
                   "body",
                   "request_id"
                 ]
@@ -5563,22 +5657,44 @@
                               "title": "Status"
                             },
                             "chat": {
-                              "type": "string",
-                              "const": "Yorko, Joshua (You)",
-                              "title": "Chat"
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
                             },
                             "message_id": {
                               "type": "string",
                               "title": "Message Id"
+                            },
+                            "time": {
+                              "type": "string",
+                              "title": "Time"
                             }
                           },
                           "type": "object",
                           "required": [
                             "status",
                             "chat",
-                            "message_id"
+                            "message_id",
+                            "time"
                           ],
-                          "title": "WebSelfReceipt"
+                          "title": "GroupReceipt"
                         },
                         {
                           "type": "null"
@@ -5600,7 +5716,7 @@
                     }
                   },
                   "type": "object",
-                  "title": "Response for Teams Web Send Self"
+                  "title": "Response for Teams Web Send Chat"
                 }
               }
             }
@@ -5620,244 +5736,43 @@
         "x-operation-kind": "action"
       }
     },
-    "/api/actions/desktop-office/teams-web-read-qa-chat/run": {
-      "post": {
-        "summary": "Teams Web Read Qa Chat",
-        "description": "Read loaded messages from the verified QA-ASSIST-VERINT-DEPLOY chat.",
-        "operationId": "teams_web_read_qa_chat",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "limit": {
-                    "type": "integer",
-                    "title": "Limit",
-                    "description": "Maximum loaded messages to return, up to 50.",
-                    "default": 20
-                  }
-                },
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
+    "/api/managed-work-items/v1/schema": {
+      "get": {
+        "summary": "Schema",
+        "operationId": "schema_api_managed_work_items_v1_schema_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "properties": {
-                    "result": {
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "chat": {
-                              "type": "string",
-                              "enum": [
-                                "QA-ASSIST-VERINT-DEPLOY",
-                                "Yorko, Joshua (You)"
-                              ],
-                              "title": "Chat"
-                            },
-                            "scope": {
-                              "type": "string",
-                              "const": "currently_loaded_history",
-                              "title": "Scope"
-                            },
-                            "messages": {
-                              "items": {
-                                "properties": {
-                                  "id": {
-                                    "type": "string",
-                                    "title": "Id"
-                                  },
-                                  "text": {
-                                    "type": "string",
-                                    "title": "Text"
-                                  },
-                                  "author": {
-                                    "type": "string",
-                                    "title": "Author"
-                                  },
-                                  "time": {
-                                    "type": "string",
-                                    "title": "Time"
-                                  }
-                                },
-                                "type": "object",
-                                "required": [
-                                  "id",
-                                  "text",
-                                  "author",
-                                  "time"
-                                ],
-                                "title": "WebChatMessage"
-                              },
-                              "type": "array",
-                              "title": "Messages"
-                            }
-                          },
-                          "type": "object",
-                          "required": [
-                            "chat",
-                            "scope",
-                            "messages"
-                          ],
-                          "title": "WebChatHistory"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The result for the action if it ran successfully"
-                    },
-                    "error": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "title": "Error",
-                      "description": "The error message if the action failed for some reason"
-                    }
-                  },
-                  "type": "object",
-                  "title": "Response for Teams Web Read Qa Chat"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
+                "schema": {}
               }
             }
           }
-        },
-        "x-openai-isConsequential": false,
-        "x-operation-kind": "action"
+        }
       }
     },
-    "/api/actions/desktop-office/teams-web-read-self-chat/run": {
-      "post": {
-        "summary": "Teams Web Read Self Chat",
-        "description": "Read loaded messages from the verified self chat.",
-        "operationId": "teams_web_read_self_chat",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "limit": {
-                    "type": "integer",
-                    "title": "Limit",
-                    "description": "Maximum loaded messages to return, up to 50.",
-                    "default": 20
-                  }
-                },
-                "type": "object"
-              }
+    "/api/managed-work-items/v1/capabilities": {
+      "get": {
+        "summary": "Capabilities",
+        "operationId": "capabilities_api_managed_work_items_v1_capabilities_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workspace Id"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "properties": {
-                    "result": {
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "chat": {
-                              "type": "string",
-                              "enum": [
-                                "QA-ASSIST-VERINT-DEPLOY",
-                                "Yorko, Joshua (You)"
-                              ],
-                              "title": "Chat"
-                            },
-                            "scope": {
-                              "type": "string",
-                              "const": "currently_loaded_history",
-                              "title": "Scope"
-                            },
-                            "messages": {
-                              "items": {
-                                "properties": {
-                                  "id": {
-                                    "type": "string",
-                                    "title": "Id"
-                                  },
-                                  "text": {
-                                    "type": "string",
-                                    "title": "Text"
-                                  },
-                                  "author": {
-                                    "type": "string",
-                                    "title": "Author"
-                                  },
-                                  "time": {
-                                    "type": "string",
-                                    "title": "Time"
-                                  }
-                                },
-                                "type": "object",
-                                "required": [
-                                  "id",
-                                  "text",
-                                  "author",
-                                  "time"
-                                ],
-                                "title": "WebChatMessage"
-                              },
-                              "type": "array",
-                              "title": "Messages"
-                            }
-                          },
-                          "type": "object",
-                          "required": [
-                            "chat",
-                            "scope",
-                            "messages"
-                          ],
-                          "title": "WebChatHistory"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The result for the action if it ran successfully"
-                    },
-                    "error": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "title": "Error",
-                      "description": "The error message if the action failed for some reason"
-                    }
-                  },
-                  "type": "object",
-                  "title": "Response for Teams Web Read Self Chat"
-                }
+                "schema": {}
               }
             }
           },
@@ -5871,9 +5786,23 @@
               }
             }
           }
-        },
-        "x-openai-isConsequential": false,
-        "x-operation-kind": "action"
+        }
+      }
+    },
+    "/api/managed-work-items/v1/operations": {
+      "post": {
+        "summary": "Operation",
+        "operationId": "operation_api_managed_work_items_v1_operations_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
       }
     }
   },

@@ -8,7 +8,7 @@ The server binds to `127.0.0.1:8766` and runs hidden under the current Windows a
 
 Codex registration uses `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` by default, and preserves other servers. Restart or reconnect the MCP client after first registration. Existing registration for another endpoint is preserved for inspection rather than overwritten.
 
-Python action changes reload automatically in development. Changes to `src/office_bridge/native/teams/` require a server restart. Check `teams_web_status.restart_required` before sends.
+Python action changes reload automatically in development. After changing `src/office_bridge/native/teams/`, run `./.runtime/Scripts/python.exe scripts/restart_teams_session.py`, then the read-only bootstrap check. This reloads the isolated Teams host while the server UI stays available. The supervisor limits starts to three per five minutes; if recovery stops, use the normal server stop/start commands. Check `teams_web_status.restart_required` before sends.
 
 ## Teams configuration and behavior
 

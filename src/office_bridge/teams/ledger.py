@@ -28,7 +28,7 @@ _thread_lock = threading.Lock()
 
 
 def expected_recipient() -> str:
-    value = os.environ.get("OFFICE_TEAMS_EXPECTED_ACCOUNT", "").strip().lower()
+    value = os.environ.get("OFFICE_BRIDGE_ACCOUNT", "").strip().lower()
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
         raise SendLedgerError("expected_account_unconfigured")
     return value
