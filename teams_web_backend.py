@@ -1,16 +1,70 @@
-"""Read-only Teams authentication probe using an isolated persistent Edge profile."""
+"""Read-only Teams probe using an isolated persistent browser profile."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import threading
 import time
+from typing import Iterator, Literal
 from urllib.parse import urlsplit
 
 from robocorp import browser
 
 TEAMS_URL = "https://teams.cloud.microsoft/"
-_lock = threading.Lock()
+BrowserEngine = Literal["chromium", "msedge"]
+Backend = Literal["chromium", "msedge", "webview2"]
+PROFILE_NAMES: dict[str, str] = {
+    "chromium": "teams-chromium-profile",
+    "msedge": "teams-web-profile",
+    "webview2": "teams-webview2-profile",
+}
+_thread_locks = {engine: threading.Lock() for engine in PROFILE_NAMES}
+
+
+def profile_path(engine: BrowserEngine = "chromium") -> Path:
+    """Resolve an engine to its fixed managed profile directory."""
+    if engine not in PROFILE_NAMES:
+        raise ValueError(f"Unsupported browser engine: {engine}")
+    return Path(os.environ["LOCALAPPDATA"]) / "OfficeActionServer" / PROFILE_NAMES[engine]
+
+
+@contextmanager
+def profile_lock(engine: BrowserEngine = "chromium", timeout: float = 3) -> Iterator[Path]:
+    """Serialize access to one profile across threads and worker processes."""
+    lock = _thread_locks[engine]
+    if not lock.acquire(timeout=timeout):
+        raise TimeoutError("profile_busy")
+    lock_file = None
+    file_locked = False
+    try:
+        profile = profile_path(engine)
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = (profile.parent / f"{PROFILE_NAMES[engine]}.lock").open("a+b")
+        import msvcrt
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                file_locked = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("profile_busy")
+                time.sleep(0.1)
+        profile.mkdir(parents=True, exist_ok=True)
+        yield profile
+    finally:
+        if lock_file is not None:
+            try:
+                if file_locked:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            finally:
+                lock_file.close()
+        lock.release()
 
 
 def _attachment_denied(context) -> bool:
@@ -53,89 +107,101 @@ def _visible(page, selector: str) -> bool:
 
 
 def _classify(page, host: str) -> str:
+    if host == "login.microsoftonline.com":
+        return "needs_interactive_login"
     title = page.title().lower()[:200]
-    if host.endswith("login.microsoftonline.com") or "sign in" in title:
+    if "sign in" in title:
         return "needs_interactive_login"
     if host != "teams.cloud.microsoft":
         return "access_blocked"
-
-    # A loaded shell alone is not proof of a signed-in Teams session. Require
-    # a recognizable application surface; identify login and access errors first.
     if _visible(page, '[data-tid="unauthorized-page"], [data-tid="error-page"]'):
         return "access_blocked"
     if _visible(page, '[data-tid="app-layout"], [data-tid="app-bar"], [data-tid="chat-list"]'):
         return "authenticated"
     if _visible(page, 'input[type="email"], input[name="loginfmt"], [data-testid="loginForm"]'):
         return "needs_interactive_login"
-    if _visible(page, '[role="progressbar"], [data-tid*="skeleton"], [aria-busy="true"]'):
-        return "failed"
-    return "failed"
+    return "loading"
 
 
-def status() -> dict[str, str]:
-    """Open fixed Teams URL and return a bounded, coarse authentication result."""
-    if not _lock.acquire(timeout=3):
-        return {"state": "failed", "hostname": "teams.cloud.microsoft", "path": "/"}
-    lock_file = None
-    file_lock_acquired = False
+def status(engine: BrowserEngine = "chromium") -> dict[str, str]:
+    """Open the fixed Teams URL and return a bounded, coarse authentication result."""
+    result = {"state": "failed", "hostname": "teams.cloud.microsoft", "path": "/", "browser_engine": engine}
     try:
-        profile = Path(os.environ["LOCALAPPDATA"]) / "OfficeActionServer" / "teams-web-profile"
-        profile.mkdir(parents=True, exist_ok=True)
-        lock_file = (profile.parent / "teams-web-profile.lock").open("a+b")
-        # Serialize independent Action Server worker processes using a byte lock.
-        import msvcrt
-
-        deadline = time.monotonic() + 3
-        while True:
+        with profile_lock(engine) as profile:
+            browser.configure(
+                browser_engine=engine,
+                headless=True,
+                persistent_context_directory=str(profile),
+            )
+            context = None
             try:
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-                file_lock_acquired = True
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    return {"state": "failed", "hostname": "teams.cloud.microsoft", "path": "/"}
-                time.sleep(0.1)
-
-        browser.configure(
-            browser_engine="msedge",
-            headless=True,
-            persistent_context_directory=str(profile),
-        )
-        context = None
-        try:
-            page = browser.page()
-            context = page.context
-            page.goto(TEAMS_URL, wait_until="domcontentloaded", timeout=20000)
-            # Allow Teams' client shell a bounded interval to expose ready/login/error evidence.
-            deadline = time.monotonic() + 6
-            state = "failed"
-            while time.monotonic() < deadline:
+                page = browser.page()
+                context = page.context
+                page.goto(TEAMS_URL, wait_until="commit", timeout=20000)
+                deadline = time.monotonic() + 30
+                state = "loading"
+                while time.monotonic() < deadline:
+                    parts = urlsplit(page.url)
+                    state = _classify(page, parts.hostname or "")
+                    if state != "loading":
+                        break
+                    page.wait_for_timeout(250)
                 parts = urlsplit(page.url)
-                state = _classify(page, parts.hostname or "")
-                if state != "failed":
-                    break
-                page.wait_for_timeout(250)
-            parts = urlsplit(page.url)
-            host, path = parts.hostname or "", parts.path or "/"
-            if host not in {"teams.cloud.microsoft", "login.microsoftonline.com"}:
-                host, path, state = "teams.cloud.microsoft", "/", "access_blocked"
-            return {"state": state, "hostname": host, "path": path[:200]}
-        except Exception:
-            if context is not None and _attachment_denied(context):
-                return {"state": "access_blocked", "hostname": "teams.cloud.microsoft", "path": "/", "reason": "browser_attachment_denied"}
-            return {"state": "failed", "hostname": "teams.cloud.microsoft", "path": "/"}
-        finally:
-            if context is not None:
-                context.close()
-    except Exception:
-        return {"state": "failed", "hostname": "teams.cloud.microsoft", "path": "/"}
-    finally:
-        if lock_file is not None:
-            try:
-                if file_lock_acquired:
-                    lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                host, path = parts.hostname or "", parts.path or "/"
+                if host not in {"teams.cloud.microsoft", "login.microsoftonline.com"}:
+                    host, path, state = "teams.cloud.microsoft", "/", "access_blocked"
+                result.update(state=state, hostname=host, path=path[:200])
+            except Exception:
+                result.update(state="failed", reason="navigation_failed")
+                if context is not None and _attachment_denied(context):
+                    result.update(state="access_blocked", reason="browser_attachment_denied")
             finally:
-                lock_file.close()
-        _lock.release()
+                if context is not None:
+                    try:
+                        context.close()
+                    except Exception:
+                        result.update(state="failed", reason="browser_cleanup_failed")
+    except TimeoutError:
+        result["reason"] = "profile_busy"
+    except Exception:
+        result.update(state="failed", reason="browser_failed")
+    return result
+
+
+def webview2_status() -> dict[str, object]:
+    """Run the fixed native adapter behind the same per-profile lock."""
+    from desktop_bridge import BridgeError, invoke
+    from install_webview2_sdk import install
+
+    result: dict[str, object] = {
+        "state": "failed", "hostname": "teams.cloud.microsoft", "path": "/",
+        "backend": "webview2",
+    }
+    try:
+        with profile_lock("webview2"):
+            install()
+            native = invoke("teams_web_status", {})
+            result.update(native)
+            result["backend"] = "webview2"
+            if native.get("state") == "authenticated":
+                if native.get("account_verified") is not True:
+                    result.update(state="failed", reason="account_unverified")
+                elif native.get("host_visible") is not False or native.get("control_visible") is not False:
+                    result.update(state="failed", reason="host_visible")
+                elif native.get("host_focused") is not False or native.get("foreground_interference") is not False:
+                    result.update(state="failed", reason="foreground_interference")
+    except TimeoutError:
+        result.update(state="failed", reason="profile_busy")
+    except BridgeError as exc:
+        result.update(state="failed", reason=exc.code)
+    except Exception:
+        result.update(state="failed", reason="webview2_failed")
+    return result
+
+
+def backend_status(backend: Backend = "webview2") -> dict[str, object]:
+    if backend == "webview2":
+        return webview2_status()
+    result = status(backend)
+    result["backend"] = backend
+    return result

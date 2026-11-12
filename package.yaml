@@ -9,6 +9,7 @@ dependencies:
     - actions-core=1.0.3
     - pydantic=2.14.3
     - robocorp-browser=2.4.0
+    - playwright=1.65.1
 pythonpath:
   - .
 dev-dependencies:
@@ -16,6 +17,8 @@ dev-dependencies:
     - pytest=8.3.3
 dev-tasks:
   test: python -m pytest tests -q
+  install-browser: python -c "from robocorp import browser; browser.install('chromium')"
+  install-webview2: python install_webview2_sdk.py
 packaging:
   exclude:
     - ./design/**
@@ -26,6 +29,7 @@ packaging:
     - ./.state/**
     - ./run_server.py
     - ./verify_mcp.py
+    - ./verify_teams_web.py
     - ./register_mcp.py
     - ./logs/**
     - ./devdata/**

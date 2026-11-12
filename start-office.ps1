@@ -20,7 +20,7 @@ if ($activeListener) {
 }
 $packageDir = Join-Path $taskRoot '.package'
 New-Item -ItemType Directory -Path (Join-Path $packageDir 'powershell') -Force | Out-Null
-foreach ($file in @('package.yaml', 'office_actions.py', 'attachment_actions.py', 'teams_web_actions.py', 'teams_web_backend.py', 'desktop_bridge.py', 'powershell\office.ps1', 'powershell\attachments.ps1')) {
+foreach ($file in @('package.yaml', 'office_actions.py', 'attachment_actions.py', 'teams_web_actions.py', 'teams_web_backend.py', 'desktop_bridge.py', 'install_webview2_sdk.py', 'powershell\office.ps1', 'powershell\attachments.ps1', 'powershell\teams_webview.ps1', 'powershell\teams_group.js')) {
     Copy-Item -LiteralPath (Join-Path $taskRoot $file) -Destination (Join-Path $packageDir $file) -Force
 }
 $keyFile = Join-Path $stateDir '.api_key'

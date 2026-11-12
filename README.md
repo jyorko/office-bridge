@@ -1,13 +1,14 @@
 # Office Bridge
 
-Local Outlook and Teams automation through the community Actions Runtime and its authenticated MCP endpoint. Windows desktop controls handle Outlook and the active Teams chat. A separate persistent Edge profile supports the Teams web status probe.
+Local Outlook and Teams automation through the community Actions Runtime and its authenticated MCP endpoint. Outlook uses Windows COM. Background Teams authentication uses WebView2 with Windows account SSO and a separate persistent profile; its containing window is never shown or activated.
 
-Requires Windows, classic Outlook, Microsoft Teams or installed Edge, and `uv` on PATH. The self-send tools are currently restricted to Joshua's work account; this is a personal automation package.
+Requires Windows, classic Outlook, the Microsoft WebView2 Runtime, and `uv` on PATH. Desktop Teams and installed Edge are optional diagnostic routes. The self-send tools are restricted to Joshua's work account; this is a personal automation package.
 
 Run these commands from this directory in PowerShell:
 
 ```powershell
 ./setup.ps1
+./.runtime/Scripts/python.exe -m actions.server devenv task install-webview2
 ./start-office.ps1
 ./.runtime/Scripts/python.exe ./verify_mcp.py
 ./.runtime/Scripts/python.exe ./register_mcp.py
@@ -27,9 +28,17 @@ For local development, stop the server and run `./start-office.ps1 -Dev`. This s
 
 `outlook_download_attachments` saves attachments into `%LOCALAPPDATA%/OfficeActionServer/attachments` and returns their local paths and SHA256 hashes. Its `pdf_only` option skips inline signature images. It scans at most 500 attachment entries and saves at most 25 files or 50 MiB per call. It never opens or executes downloaded files.
 
-`teams_web_status` uses `from actions import action` and `from robocorp import browser`. It configures installed Edge with `browser_engine="msedge"`, `headless=True`, and `%LOCALAPPDATA%/OfficeActionServer/teams-web-profile` as its persistent context directory. It reports authentication state; web chat reads and sends are not implemented yet. The dedicated profile does not inherit an existing Edge profile's login. Run `teams_web_login.py` in the runtime environment for a coordinated, visible first sign-in. Normal browser windows stay separate.
+`teams_web_status` defaults to `browser_engine="webview2"`. A fixed PowerShell adapter uses the public WebView2 controller API, requests Windows primary account SSO, and keeps its containing window unshown. The page renderer remains active so Teams can finish loading. The adapter checks the signed-in profile menu for the exact work account and blocks popups and external app launches. Its profile is `%LOCALAPPDATA%/OfficeActionServer/teams-webview2-profile`. Fresh managed MCP workers verified this background authentication path on this laptop without a sign-in prompt.
 
-The sign-in helper stays open until you close its isolated browser windows. Windows account sign-in may complete automatically. A saved login does not guarantee automation access: `access_blocked` with `browser_attachment_denied` means Edge refused the Teams page's DevTools attachment. This restriction was observed on this laptop; its governing setting has not been identified.
+`teams_web_send_qa_chat` sends only to the exact `QA-ASSIST-VERINT-DEPLOY` chat. It checks the signed-in account, chat title, and empty composer before sending, then observes the message in the chat. It records a request ID and body digest outside the repository before the attempt; an uncertain outcome is never retried automatically. A live MCP call sent and observed a message in that group. General web chat reads and self-chat sends are not yet exposed as actions.
+
+The SDK installer pins Microsoft's NuGet package and DLL hashes, installs only the required SDK files into `%LOCALAPPDATA%/OfficeActionServer/webview2-sdk`, and verifies cached files before reuse. It does not install or modify the system WebView2 Runtime. Windows and organization authentication requirements still apply; a new sign-in challenge is reported rather than bypassed.
+
+`browser_engine="chromium"` and `"msedge"` remain isolated diagnostic routes using `robocorp-browser`. Provision matching Chromium with the `install-browser` development task. Those routes use separate profiles and do not share a normal browser's cookies.
+
+Verify the default background path with `./.runtime/Scripts/python.exe verify_teams_web.py --dev` while the development server is running; omit `--dev` for the authenticated server. This read-only check performs two independent MCP sessions and requires the correct account, hidden host, and no owned-window focus. It records user foreground changes separately from automation interference.
+
+The optional `teams_web_login.py` helper is for coordinated, visible Chromium or Edge diagnosis. It uses the same profile lock as MCP and stays open until its windows close. It is not part of the default WebView2 workflow. In the Edge route, `access_blocked` with `browser_attachment_denied` means the browser refused the Teams page's DevTools attachment. No explicit DevTools policy appeared on this laptop; Defender for Cloud Apps in-browser protection is a possible cause, but its governing control has not been confirmed.
 
 Run the offline checks with:
 

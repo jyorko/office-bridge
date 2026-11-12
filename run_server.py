@@ -18,7 +18,7 @@ def watch_sources():
     authored = {
         ROOT / path.relative_to(staged)
         for path in staged.rglob("*")
-        if path.is_file() and path.suffix in {".py", ".yaml", ".ps1"}
+        if path.is_file() and path.suffix in {".py", ".yaml", ".ps1", ".js"}
     }
     for changes in watch(
         ROOT, ROOT / "powershell", recursive=False,
