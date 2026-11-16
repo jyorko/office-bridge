@@ -5,7 +5,8 @@ from typing import Annotated, Literal
 from actions import ActionError, Response, action
 from pydantic import Field
 
-from office_bridge.teams import backend, lookup, service
+from office_bridge.teams import backend, lookup, messages, service
+from office_bridge.teams.messages import MessageLink, MessageReactions, ReactionReceipt
 from office_bridge.teams.models import (
     EditReceipt,
     GroupReceipt,
@@ -128,3 +129,53 @@ def teams_web_edit_message(
         request_id,
         body_format,
     )
+
+
+@action(is_consequential=False)
+def teams_web_message_link(
+    chat: WebChatRef,
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")],
+) -> Response[MessageLink]:
+    """Return a deep link to an exact existing message without using the clipboard.
+
+    Args:
+        chat: Exact chat reference returned by list or find.
+        message_id: Message ID returned by read_chat.
+    """
+    return _respond(messages.link, chat, message_id)
+
+
+@action(is_consequential=False)
+def teams_web_message_reactions(
+    chat: WebChatRef,
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")],
+    expected_text: Annotated[str, Field(max_length=2000)],
+) -> Response[MessageReactions]:
+    """List supported reaction controls for one exact message without reacting.
+
+    Args:
+        chat: Exact chat reference returned by list or find.
+        message_id: Message ID returned by read_chat.
+        expected_text: Exact message text returned by read_chat.
+    """
+    return _respond(messages.reactions, chat, message_id, expected_text)
+
+
+@action(is_consequential=True)
+def teams_web_react_message(
+    chat: WebChatRef,
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")],
+    expected_text: Annotated[str, Field(max_length=2000)],
+    reaction: Annotated[str, Field(min_length=1, max_length=80)],
+    request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+) -> Response[ReactionReceipt]:
+    """Add one authorized reaction; an existing own reaction is never toggled off.
+
+    Args:
+        chat: Exact chat reference returned by list or find.
+        message_id: Message ID returned by read_chat.
+        expected_text: Exact message text used to guard against changes.
+        reaction: Exact enabled name returned by message_reactions.
+        request_id: Unique reaction ID; uncertain outcomes cannot be replayed.
+    """
+    return _respond(messages.react, chat, message_id, expected_text, reaction, request_id)

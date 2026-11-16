@@ -7085,6 +7085,475 @@
         "x-openai-isConsequential": false,
         "x-operation-kind": "action"
       }
+    },
+    "/api/actions/desktop-office/teams-web-message-link/run": {
+      "post": {
+        "summary": "Teams Web Message Link",
+        "description": "Return a deep link to an exact existing message without using the clipboard.",
+        "operationId": "teams_web_message_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by list or find."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Message ID returned by read_chat."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "message_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "title": "Message Id"
+                            },
+                            "url": {
+                              "type": "string",
+                              "pattern": "^https://teams\\.microsoft\\.com/l/message/",
+                              "title": "Url"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "chat",
+                            "message_id",
+                            "url"
+                          ],
+                          "title": "MessageLink"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Message Link"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-message-reactions/run": {
+      "post": {
+        "summary": "Teams Web Message Reactions",
+        "description": "List supported reaction controls for one exact message without reacting.",
+        "operationId": "teams_web_message_reactions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by list or find."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Message ID returned by read_chat."
+                  },
+                  "expected_text": {
+                    "type": "string",
+                    "title": "Expected Text",
+                    "description": "Exact message text returned by read_chat."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "message_id",
+                  "expected_text"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "title": "Message Id"
+                            },
+                            "reactions": {
+                              "items": {
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "title": "Name"
+                                  },
+                                  "selected": {
+                                    "type": "boolean",
+                                    "title": "Selected"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "selected"
+                                ],
+                                "title": "ReactionChoice"
+                              },
+                              "type": "array",
+                              "title": "Reactions"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "chat",
+                            "message_id",
+                            "reactions"
+                          ],
+                          "title": "MessageReactions"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Message Reactions"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-react-message/run": {
+      "post": {
+        "summary": "Teams Web React Message",
+        "description": "Add one authorized reaction; an existing own reaction is never toggled off.",
+        "operationId": "teams_web_react_message",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by list or find."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Message ID returned by read_chat."
+                  },
+                  "expected_text": {
+                    "type": "string",
+                    "title": "Expected Text",
+                    "description": "Exact message text used to guard against changes."
+                  },
+                  "reaction": {
+                    "type": "string",
+                    "title": "Reaction",
+                    "description": "Exact enabled name returned by message_reactions."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "title": "Request Id",
+                    "description": "Unique reaction ID; uncertain outcomes cannot be replayed."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "message_id",
+                  "expected_text",
+                  "reaction",
+                  "request_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "title": "Message Id"
+                            },
+                            "reaction": {
+                              "type": "string",
+                              "title": "Reaction"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "reacted",
+                                "already_reacted"
+                              ],
+                              "title": "Status"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "chat",
+                            "message_id",
+                            "reaction",
+                            "status"
+                          ],
+                          "title": "ReactionReceipt"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web React Message"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
     }
   },
   "components": {

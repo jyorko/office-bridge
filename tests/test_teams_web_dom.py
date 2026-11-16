@@ -44,6 +44,175 @@ EMPTY_FORMATTING = {
 }
 
 
+def test_message_reactions_and_links_are_bound_to_exact_message(page):
+    message_id = "message-body-1700000000000"
+    page.evaluate(
+        """id=>{
+          const item=document.createElement('div');item.dataset.tid='chat-pane-item';
+          item.innerHTML='<div data-tid="chat-pane-message" id="'+id+'">Hello</div>'
+            +'<div role="toolbar" aria-label="Reactions and message actions">'
+            +'<button aria-label="Like" aria-pressed="false" onclick="window.reactions=(window.reactions||0)+1;this.setAttribute(\\'aria-pressed\\',\\'true\\')">Like</button></div>';
+          document.body.append(item);
+        }""",
+        message_id,
+    )
+
+    def operate(phase, **overrides):
+        request = {
+            "phase": phase,
+            "chatId": CHAT_ID,
+            "title": TITLE,
+            "messageId": message_id,
+            "expectedText": "Hello",
+            "reaction": "Like",
+            "requestId": "one",
+            **overrides,
+        }
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)", [SCRIPT, request]
+        )
+
+    assert operate("message_link")["url"].startswith("https://teams.microsoft.com/l/message/")
+    assert operate("message_reactions")["reactions"] == [{"name": "Like", "selected": False}]
+    assert operate("message_react", expectedText="Wrong")["state"] == "message_changed"
+    assert operate("message_react", chatId="19:wrong@thread.v2")["state"] == "waiting"
+    assert page.evaluate("window.reactions||0") == 0
+    page.evaluate("window.reactionNow=10000;Date.now=()=>window.reactionNow")
+    assert operate("message_react")["state"] == "reaction_clicked"
+    assert operate("message_observe")["state"] == "waiting"
+    page.evaluate("window.reactionNow+=2100")
+    assert operate("message_observe")["state"] == "reacted"
+    assert operate("message_react")["state"] == "already_reacted"
+    assert page.evaluate("window.reactions") == 1
+    page.locator('button[aria-label="Like"]').evaluate("e=>e.setAttribute('aria-pressed','false')")
+    assert operate("message_react")["state"] == "reaction_uncertain"
+    assert page.evaluate("window.reactions") == 1
+
+
+def test_toolbar_reaction_checks_content_after_reaction_summary_changes(page):
+    message_id = "message-body-1700000000000"
+    page.evaluate(
+        """id=>{
+          const item=document.createElement('div');item.dataset.tid='chat-pane-item';
+          item.innerHTML='<div data-tid="chat-pane-message" id="'+id+'">'
+            +'<div data-message-content>Hello</div></div>'
+            +'<div role="toolbar" aria-label="Reactions and message actions">'
+            +'<button aria-label="Like" aria-pressed="false">Like</button></div>';
+          document.body.append(item);
+          item.querySelector('button').onclick=function(){
+            this.setAttribute('aria-pressed','true');
+            document.getElementById(id).insertAdjacentHTML('beforeend',
+              '<div data-tid="diverse-reaction-summary">1 Like reaction.</div>');
+          };
+          window.reactionNow=10000;Date.now=()=>window.reactionNow;
+        }""",
+        message_id,
+    )
+
+    def operate(phase):
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)",
+            [
+                SCRIPT,
+                {
+                    "phase": phase,
+                    "chatId": CHAT_ID,
+                    "title": TITLE,
+                    "messageId": message_id,
+                    "expectedText": "Hello",
+                    "reaction": "Like",
+                    "requestId": "summary",
+                },
+            ],
+        )
+
+    assert operate("message_react")["state"] == "reaction_clicked"
+    assert operate("message_observe")["state"] == "waiting"
+    page.evaluate("window.reactionNow+=2100")
+    assert operate("message_observe")["state"] == "reacted"
+    page.locator("[data-message-content]").evaluate("e=>e.innerText='Edited'")
+    assert operate("message_observe")["state"] == "reaction_uncertain"
+
+
+def test_picker_reaction_survives_summary_text_and_toolbar_dismissal(page):
+    message_id = "message-body-1700000000000"
+    page.evaluate(
+        """id=>{
+          const item=document.createElement('div');item.dataset.tid='chat-pane-item';
+          item.innerHTML='<div data-tid="chat-pane-message" id="'+id+'">'
+            +'<button data-tid="message-actions-menu-hidden-button"></button>'
+            +'<div data-message-content>Hello</div></div>';
+          document.body.append(item);
+          const toolbar=document.createElement('div');
+          toolbar.setAttribute('role','toolbar');
+          toolbar.setAttribute('aria-label','Reactions and message actions');
+          toolbar.innerHTML='<button data-tid="expanded-reactions-picker-entry">More</button>';
+          document.body.append(toolbar);
+          toolbar.firstChild.onclick=()=>{
+            const picker=document.createElement('div');
+            picker.id='expanded-reaction-picker-popup-surface';
+            picker.innerHTML='<button aria-label="Hundred points" data-tid="emoticon-button-1f4af_hundredpointssymbol">'
+              +'<img itemid="1f4af_hundredpointssymbol"></button>';
+            picker.firstChild.onclick=()=>{
+              window.reactions=(window.reactions||0)+1;
+              document.getElementById(id).insertAdjacentHTML('beforeend',
+                '<button data-tid="diverse-reaction-pill-button" aria-pressed="true">'
+                +'<img itemid="1f4af_hundredpointssymbol">1 Hundred points reaction.</button>');
+              toolbar.remove();picker.remove();
+            };
+            document.body.append(picker);
+          };
+          window.reactionNow=10000;Date.now=()=>window.reactionNow;
+        }""",
+        message_id,
+    )
+
+    def operate(phase, **overrides):
+        request = {
+            "phase": phase,
+            "chatId": CHAT_ID,
+            "title": TITLE,
+            "messageId": message_id,
+            "expectedText": "Hello",
+            "reaction": "Hundred points",
+            "requestId": "hundred",
+            **overrides,
+        }
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)", [SCRIPT, request]
+        )
+
+    assert operate("message_picker_open")["state"] == "reaction_unavailable"
+    assert operate("message_open")["state"] == "toolbar_opening"
+    assert operate("message_picker_open")["state"] == "picker_opening"
+    assert operate("message_reactions")["reactions"] == [
+        {"name": "Hundred points", "selected": False}
+    ]
+    assert operate("message_react")["state"] == "reaction_clicked"
+    assert operate("message_observe")["state"] == "waiting"
+    page.evaluate("window.reactionNow+=2100")
+    assert operate("message_observe")["state"] == "reacted"
+    assert page.evaluate("window.reactions") == 1
+    page.evaluate(
+        """()=>{
+          const picker=document.createElement('div');
+          picker.id='expanded-reaction-picker-popup-surface';
+          picker.innerHTML='<button aria-label="Undo Hundred points" data-tid="emoticon-button-1f4af_hundredpointssymbol">'
+            +'<img itemid="1f4af_hundredpointssymbol"></button>';
+          picker.firstChild.onclick=()=>window.reactions++;
+          document.body.append(picker);
+        }"""
+    )
+    current_text = page.locator(f'[id="{message_id}"]').inner_text()
+    assert operate("message_reactions", expectedText=current_text)["reactions"] == [
+        {"name": "Hundred points", "selected": True}
+    ]
+    assert operate("message_react", expectedText=current_text)["state"] == "already_reacted"
+    assert page.evaluate("window.reactions") == 1
+    page.locator("[data-message-content]").evaluate("e=>e.innerText='Edited'")
+    assert operate("message_observe")["state"] == "reaction_uncertain"
+
+
 def run(
     page,
     phase,

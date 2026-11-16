@@ -214,6 +214,128 @@
   }
   if (!headerMatches() || matchingRows().length !== 1)
     return {state: 'waiting'};
+  if (phase.startsWith('message_')) {
+    const message=document.getElementById(messageId);
+    if (phase==='message_locate' && !message) {
+      const first=document.querySelector('[data-tid="chat-pane-message"]');
+      let scroll=first;
+      while (scroll && scroll!==document.body) {
+        if (scroll.scrollHeight>scroll.clientHeight+1 &&
+            /^(auto|scroll)$/.test(getComputedStyle(scroll).overflowY)) break;
+        scroll=scroll.parentElement;
+      }
+      if (!scroll || scroll===document.body) return {state:'message_not_loaded'};
+      const key=chatId+'\0'+messageId;
+      if (window.__officeMessageLocate!==key) {
+        window.__officeMessageLocate=key;
+        scroll.scrollTop=scroll.scrollHeight;
+      } else scroll.scrollTop=Math.max(0,scroll.scrollTop-Math.max(100,scroll.clientHeight*0.7));
+      return {state:'waiting'};
+    }
+    if (!/^message-body-[0-9]{13}$/.test(messageId||'') ||
+        !message || message.getAttribute('data-tid')!=='chat-pane-message')
+      return {state:'message_not_loaded'};
+    const result={chat_id:chatId,title,message_id:messageId};
+    if (phase==='message_locate') return {...result,state:'message_loaded'};
+    if (phase==='message_link') return {...result,state:'linked',
+      url:'https://teams.microsoft.com/l/message/'+encodeURIComponent(chatId)+'/'+
+        messageId.slice('message-body-'.length)+'?context='+encodeURIComponent('{"contextType":"chat"}')};
+    const contentText=()=> (message.querySelector('[data-message-content]') || message).innerText;
+    if (phase!=='message_observe' &&
+        (typeof expectedText!=='string' || message.innerText!==expectedText))
+      return {state:'message_changed'};
+    const root=message.closest('[data-tid="chat-pane-item"]');
+    if (!root || root.querySelectorAll('[data-tid="chat-pane-message"]').length!==1)
+      return {state:'message_ambiguous'};
+    if (phase==='message_open') {
+      const triggers=message.querySelectorAll('button[data-tid="message-actions-menu-hidden-button"]');
+      if (triggers.length!==1 || triggers[0].disabled) return {state:'reaction_unavailable'};
+      window.__officeMessageControls={chatId,title,messageId};
+      triggers[0].focus({preventScroll:true});
+      triggers[0].click();
+      return {...result,state:'toolbar_opening'};
+    }
+    if (phase==='message_hover') {
+      message.scrollIntoView({block:'center',behavior:'instant'});
+      const r=message.getBoundingClientRect();
+      return {...result,state:'hover',point:{x:r.x+r.width/2,y:r.y+Math.min(r.height/2,20)}};
+    }
+    const visible=e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden';
+    const opened=window.__officeMessageControls;
+    const bound=opened && opened.chatId===chatId && opened.title===title && opened.messageId===messageId;
+    if (phase==='message_picker_open') {
+      if (!bound) return {state:'reaction_unavailable'};
+      const more=Array.from(document.querySelectorAll(
+        '[role="toolbar"][aria-label="Reactions and message actions"] [data-tid="expanded-reactions-picker-entry"]'))
+        .filter(visible);
+      if (more.length!==1 || more[0].disabled) return {state:'reaction_unavailable'};
+      window.__officeReactionPicker={chatId,title,messageId};
+      more[0].click();
+      return {...result,state:'picker_opening'};
+    }
+    const toolbars=Array.from((bound?document:root).querySelectorAll('[role="toolbar"][aria-label="Reactions and message actions"]'))
+      .filter(visible);
+    const labels=['Like','Heart','Laugh','Surprised','Sad','Angry'];
+    const reactionName=e=>{
+      const label=e.getAttribute('aria-label')||'';
+      const tid=e.getAttribute('data-tid')||'';
+      if (/^message-actions-yes(?:-tone[1-6])?$/.test(tid) && /^Like(?: with .+ skin tone)?$/.test(label))
+        return 'Like';
+      return labels.includes(label)?label:null;
+    };
+    const controls=toolbars.length===1?Array.from(toolbars[0].querySelectorAll('button'))
+      .filter(e=>visible(e)&&reactionName(e)):[];
+    const selected=e=>e.getAttribute('aria-pressed')==='true'||e.getAttribute('aria-checked')==='true';
+    const itemId=e=>e.querySelector('img[itemid]')?.getAttribute('itemid') ||
+      (e.getAttribute('data-tid')||'').replace(/^message-actions-/,'');
+    const pills=id=>Array.from(message.querySelectorAll('[data-tid="diverse-reaction-pill-button"]'))
+      .filter(e=>e.querySelector('img[itemid]')?.getAttribute('itemid')===id);
+    const chosen=id=>pills(id).some(selected);
+    const available=controls.filter(e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true');
+    const pickerBinding=window.__officeReactionPicker;
+    const pickerBound=bound && pickerBinding?.chatId===chatId && pickerBinding?.title===title &&
+      pickerBinding?.messageId===messageId;
+    const picker=pickerBound?document.getElementById('expanded-reaction-picker-popup-surface'):null;
+    const emoji=picker?Array.from(picker.querySelectorAll('button[data-tid^="emoticon-button-"]'))
+      .filter(e=>visible(e)&&!e.disabled&&e.getAttribute('aria-disabled')!=='true' &&
+        e.getAttribute('aria-label') && e.querySelector('img[itemid]')):[];
+    const name=e=>{
+      if (controls.includes(e)) return reactionName(e);
+      const label=e.getAttribute('aria-label');
+      return label.startsWith('Undo ') && chosen(itemId(e)) ? label.slice(5) : label;
+    };
+    const all=[...available,...emoji];
+    if (phase==='message_reactions') return {...result,state:'reactions',picker_ready:emoji.length>0,
+      reactions:all.map(e=>({name:name(e),selected:selected(e)||chosen(itemId(e))}))
+        .filter((e,i,a)=>a.findIndex(other=>other.name===e.name)===i)};
+    if (phase==='message_observe') {
+      const prior=window.__officeReaction;
+      if (!prior || prior.id!==requestId || prior.chatId!==chatId || prior.title!==title ||
+          prior.messageId!==messageId || prior.reaction!==request.reaction ||
+          prior.content!==contentText()) return {state:'reaction_uncertain'};
+      const settled=chosen(prior.itemId) ||
+        available.some(e=>name(e)===prior.reaction && selected(e));
+      if (!settled) {prior.stableSince=0;return {state:'waiting'};}
+      if (!prior.stableSince) {prior.stableSince=Date.now();return {state:'waiting'};}
+      return Date.now()-prior.stableSince>=2000?
+        {...result,state:'reacted',reaction:request.reaction}:{state:'waiting'};
+    }
+    const matches=all.filter(e=>name(e)===request.reaction);
+    if (matches.length!==1) return {state:'reaction_unavailable'};
+    if (phase==='message_react') {
+      if (!emoji.includes(matches[0]) && !['true','false'].includes(matches[0].getAttribute('aria-pressed')||
+          matches[0].getAttribute('aria-checked'))) return {state:'reaction_unavailable'};
+      if (selected(matches[0])||chosen(itemId(matches[0])))
+        return {...result,state:'already_reacted',reaction:request.reaction};
+      const prior=window.__officeReaction;
+      if (prior && prior.id===requestId) return {state:'reaction_uncertain'};
+      window.__officeReaction={id:requestId,chatId,title,messageId,reaction:request.reaction,
+        itemId:itemId(matches[0]),content:contentText()};
+      matches[0].click();
+      return {...result,state:'reaction_clicked'};
+    }
+    return {state:'unsupported_phase'};
+  }
   if (phase.startsWith('edit_')) {
     const ownMessage = () => {
       const message = document.getElementById(messageId);

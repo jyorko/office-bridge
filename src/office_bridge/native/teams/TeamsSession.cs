@@ -1091,6 +1091,9 @@ public sealed class TeamsSession : ApplicationContext
                 throw new InvalidDataException();
             return new Dictionary<string, object> { { "shutdown", true } };
         }
+        if (op == "teams_web_message_link" || op == "teams_web_message_reactions" ||
+            op == "teams_web_react_message")
+            return await MessageAction(op, request["arguments"] as Dictionary<string, object>);
         if (op == "teams_web_list_chats" || op == "teams_web_read_chat" ||
             op == "teams_web_send_chat" || op == "teams_web_inspect_message" ||
             op == "teams_web_edit_message")
@@ -1215,6 +1218,117 @@ public sealed class TeamsSession : ApplicationContext
             await Task.Delay(150);
         }
         throw new TimeoutException();
+    }
+    async Task<Dictionary<string, object>> MessageAction(string operation, Dictionary<string, object> args)
+    {
+        object rawChat, rawMessage, rawExpected, rawReaction, rawId;
+        if (args == null || !args.TryGetValue("chat", out rawChat) ||
+            !args.TryGetValue("message_id", out rawMessage)) throw new InvalidDataException();
+        var chat = rawChat as Dictionary<string, object>;
+        if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
+            throw new InvalidDataException();
+        string chatId = chat["chat_id"] as string, title = chat["title"] as string,
+               messageId = rawMessage as string;
+        string expected = args.TryGetValue("expected_text", out rawExpected) ? rawExpected as string : null;
+        string reaction = args.TryGetValue("reaction", out rawReaction) ? rawReaction as string : null;
+        string id = args.TryGetValue("request_id", out rawId) ? rawId as string : null;
+        bool mutate = operation == "teams_web_react_message";
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
+            !Regex.IsMatch(messageId ?? "", "^message-body-[0-9]{13}$") ||
+            (operation != "teams_web_message_link" && (expected == null || expected.Length > 2000)) ||
+            (mutate && (String.IsNullOrEmpty(reaction) || reaction.Length > 80 ||
+                        !Regex.IsMatch(id ?? "", "^[A-Za-z0-9._-]{1,128}$"))))
+            throw new InvalidDataException();
+        var context = await BeginCrossChat();
+        string author = currentAccountName;
+        await Read(new Dictionary<string, object> { { "chat", chat }, { "limit", 1 } }, context);
+        var request = new Dictionary<string, object> {
+            { "chatId", chatId }, { "title", title }, { "messageId", messageId },
+            { "expectedText", expected }, { "reaction", reaction }, { "requestId", id },
+            { "phase", operation == "teams_web_message_link" ? "message_link" : "message_hover" }
+        };
+        string operationPhase = Convert.ToString(request["phase"]);
+        request["phase"] = "message_locate";
+        var locateDeadline = DateTime.UtcNow.AddSeconds(15);
+        Dictionary<string, object> located;
+        do {
+            await VerifyCrossChat(context, author);
+            located = await RunChat(context.Core, request);
+            if (Convert.ToString(located["state"]) != "waiting") break;
+            await Task.Delay(250);
+        } while (DateTime.UtcNow < locateDeadline);
+        if (Convert.ToString(located["state"]) != "message_loaded")
+            throw new InvalidOperationException("message_not_loaded");
+        request["phase"] = operationPhase;
+        var result = await RunChat(context.Core, request);
+        if (operation == "teams_web_message_link")
+        {
+            await VerifyCrossChat(context, author);
+            return result;
+        }
+        if (Convert.ToString(result["state"]) != "hover")
+            throw new InvalidOperationException(Convert.ToString(result["state"]));
+        var point = result["point"] as Dictionary<string, object>;
+        await context.Core.CallDevToolsProtocolMethodAsync("Emulation.setFocusEmulationEnabled",
+            "{\"enabled\":true}");
+        Exception operationError = null;
+        try {
+        request["phase"] = "message_open";
+        var opened = await RunChat(context.Core, request);
+        if (Convert.ToString(opened["state"]) != "toolbar_opening")
+            throw new InvalidOperationException("reaction_unavailable");
+        await context.Core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", Json.Serialize(
+            new Dictionary<string, object> { { "type", "mouseMoved" }, { "x", point["x"] },
+                { "y", point["y"] } }));
+        await Task.Delay(300);
+        if (!await PrimaryUnchanged(context) || !ScriptsUnchanged())
+            throw new InvalidOperationException("primary_state_changed");
+        request["phase"] = "message_reactions";
+        result = await RunChat(context.Core, request);
+        request["phase"] = "message_picker_open";
+        var pickerOpened = await RunChat(context.Core, request);
+        if (Convert.ToString(pickerOpened["state"]) == "picker_opening") {
+            request["phase"] = "message_reactions";
+            var pickerDeadline = DateTime.UtcNow.AddSeconds(3);
+            do {
+                await Task.Delay(150);
+                result = await RunChat(context.Core, request);
+            } while (!Flag(result, "picker_ready") && DateTime.UtcNow < pickerDeadline);
+        }
+        if (mutate) {
+        string claims = Path.Combine(Path.GetDirectoryName(profile), "teams-web-sends", "reactions");
+        Directory.CreateDirectory(claims);
+        string digest;
+        using (var sha = SHA256.Create())
+            digest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(id))).Replace("-", "");
+        using (var claim = new FileStream(Path.Combine(claims, digest), FileMode.CreateNew,
+                                         FileAccess.Write, FileShare.None))
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(args));
+            claim.Write(bytes, 0, bytes.Length);
+            claim.Flush(true);
+        }
+        request["phase"] = "message_react";
+        result = await RunChat(context.Core, request);
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        if (Convert.ToString(result["state"]) == "reaction_clicked")
+        {
+            request["phase"] = "message_observe";
+            do {
+                await Task.Delay(200);
+                if (!await PrimaryUnchanged(context) || !ScriptsUnchanged())
+                    throw new InvalidOperationException("primary_state_changed");
+                result = await RunChat(context.Core, request);
+            } while (Convert.ToString(result["state"]) == "waiting" && DateTime.UtcNow < deadline);
+        }
+        await VerifyCrossChat(context, author);
+        }
+        } catch (Exception error) { operationError = error; }
+        await context.Core.CallDevToolsProtocolMethodAsync("Emulation.setFocusEmulationEnabled",
+            "{\"enabled\":false}");
+        if (operationError != null) throw operationError;
+        await VerifyCrossChat(context, author);
+        return result;
     }
     async Task<Dictionary<string, object>> InspectMessage(Dictionary<string, object> args)
     {
