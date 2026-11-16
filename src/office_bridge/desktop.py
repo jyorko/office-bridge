@@ -34,6 +34,7 @@ OPERATIONS = frozenset(
         "teams_web_message_link",
         "teams_web_message_reactions",
         "teams_web_react_message",
+        "teams_web_set_reaction",
     }
 )
 MUTATIONS = frozenset(
@@ -46,6 +47,7 @@ MUTATIONS = frozenset(
         "teams_web_send_chat",
         "teams_web_edit_message",
         "teams_web_react_message",
+        "teams_web_set_reaction",
     }
 )
 MAX_BYTES = 1_048_576
@@ -74,6 +76,7 @@ def invoke(operation: str, arguments: dict) -> dict:
         "teams_web_message_link",
         "teams_web_message_reactions",
         "teams_web_react_message",
+        "teams_web_set_reaction",
     }:
         from office_bridge.teams.session import SessionError
         from office_bridge.teams.session import invoke as invoke_session

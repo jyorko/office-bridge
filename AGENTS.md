@@ -2,6 +2,8 @@
 
 ## Scope and tools
 
+- For using the MCP, read `.agents/skills/office-bridge-mcp/SKILL.md` and the relevant workflow reference. Work tracking requires a user-authorized session/chat opt-in; do not infer it from a passive read or an installation check.
+
 - Use the community `actions-runtime` and `actions-core` packages from `joshyorko/actions`. Do not replace the official server with a custom MCP or HTTP server.
 - All subagents must use LUNA unless the user explicitly authorizes another model.
 - Read the relevant RCC Action Server skill before changing package or runtime integration.

@@ -44,6 +44,25 @@ EMPTY_FORMATTING = {
 }
 
 
+def test_unread_badge_does_not_block_exact_header_verified_read(page):
+    page.locator('[role="treeitem"]').evaluate(
+        """row=>{const badge=document.createElement('span');
+        badge.textContent='Unread';row.prepend(badge);}"""
+    )
+    request = {"phase": "locate", "chatId": CHAT_ID, "title": TITLE}
+    evaluate = "([source,request])=>(0,eval)('('+source+')')(request)"
+    assert page.evaluate(evaluate, [SCRIPT, {"phase": "list", "limit": 50}])["items"] == [
+        {"chat_id": CHAT_ID, "title": TITLE}
+    ]
+    assert page.evaluate(evaluate, [SCRIPT, request])["state"] == "ready"
+    request["title"] = "Wrong Group"
+    assert page.evaluate(evaluate, [SCRIPT, request])["state"] == "navigate"
+    request["phase"] = "read"
+    assert page.evaluate(evaluate, [SCRIPT, request])["state"] == "waiting"
+    request.update(title=TITLE, chatId="19:wrong@thread.v2")
+    assert page.evaluate(evaluate, [SCRIPT, request])["state"] == "waiting"
+
+
 def test_message_reactions_and_links_are_bound_to_exact_message(page):
     message_id = "message-body-1700000000000"
     page.evaluate(
@@ -73,7 +92,9 @@ def test_message_reactions_and_links_are_bound_to_exact_message(page):
         )
 
     assert operate("message_link")["url"].startswith("https://teams.microsoft.com/l/message/")
-    assert operate("message_reactions")["reactions"] == [{"name": "Like", "selected": False}]
+    assert operate("message_reactions")["reactions"] == [
+        {"name": "Like", "selected": False, "emoji_id": ""}
+    ]
     assert operate("message_react", expectedText="Wrong")["state"] == "message_changed"
     assert operate("message_react", chatId="19:wrong@thread.v2")["state"] == "waiting"
     assert page.evaluate("window.reactions||0") == 0
@@ -186,7 +207,7 @@ def test_picker_reaction_survives_summary_text_and_toolbar_dismissal(page):
     assert operate("message_open")["state"] == "toolbar_opening"
     assert operate("message_picker_open")["state"] == "picker_opening"
     assert operate("message_reactions")["reactions"] == [
-        {"name": "Hundred points", "selected": False}
+        {"name": "Hundred points", "selected": False, "emoji_id": "1f4af_hundredpointssymbol"}
     ]
     assert operate("message_react")["state"] == "reaction_clicked"
     assert operate("message_observe")["state"] == "waiting"
@@ -205,11 +226,93 @@ def test_picker_reaction_survives_summary_text_and_toolbar_dismissal(page):
     )
     current_text = page.locator(f'[id="{message_id}"]').inner_text()
     assert operate("message_reactions", expectedText=current_text)["reactions"] == [
-        {"name": "Hundred points", "selected": True}
+        {"name": "Hundred points", "selected": True, "emoji_id": "1f4af_hundredpointssymbol"}
     ]
     assert operate("message_react", expectedText=current_text)["state"] == "already_reacted"
     assert page.evaluate("window.reactions") == 1
     page.locator("[data-message-content]").evaluate("e=>e.innerText='Edited'")
+    assert operate("message_observe")["state"] == "reaction_uncertain"
+
+
+def test_eyes_desired_state_preserves_other_participants_and_verifies_removal(page):
+    message_id = "message-body-1700000000000"
+    page.evaluate(
+        """id=>{
+          const item=document.createElement('div');item.dataset.tid='chat-pane-item';
+          item.innerHTML='<div data-tid="chat-pane-message" id="'+id+'">'
+            +'<button data-tid="message-actions-menu-hidden-button"></button>'
+            +'<div data-message-content>Task</div>'
+            +'<button data-tid="diverse-reaction-pill-button" aria-pressed="false">'
+            +'<img itemid="1f440_eyes">1 Eyes reaction.</button></div>';
+          document.body.append(item);
+          const pill=item.querySelector('[data-tid="diverse-reaction-pill-button"]');
+          pill.onclick=()=>{
+            window.removals=(window.removals||0)+1;pill.setAttribute('aria-pressed','false');
+          };
+          const toolbar=document.createElement('div');
+          toolbar.setAttribute('role','toolbar');
+          toolbar.setAttribute('aria-label','Reactions and message actions');
+          toolbar.innerHTML='<button data-tid="expanded-reactions-picker-entry">More</button>';
+          document.body.append(toolbar);
+          toolbar.firstChild.onclick=()=>{
+            const picker=document.createElement('div');
+            picker.id='expanded-reaction-picker-popup-surface';
+            picker.innerHTML='<button aria-label="Eyes" data-tid="emoticon-button-1f440_eyes">'
+              +'<img itemid="1f440_eyes"></button>';
+            picker.firstChild.onclick=()=>{
+              window.adds=(window.adds||0)+1;pill.setAttribute('aria-pressed','true');picker.remove();
+            };
+            document.body.append(picker);
+          };
+          window.now=10000;Date.now=()=>window.now;
+        }""",
+        message_id,
+    )
+
+    def operate(phase, **overrides):
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)",
+            [
+                SCRIPT,
+                {
+                    "phase": phase,
+                    "chatId": CHAT_ID,
+                    "title": TITLE,
+                    "messageId": message_id,
+                    "expectedText": "Task",
+                    "contentOnly": True,
+                    "reaction": "Eyes",
+                    "emojiId": "1f440_eyes",
+                    "selected": False,
+                    "requestId": "remove-eyes",
+                    **overrides,
+                },
+            ],
+        )
+
+    assert operate("message_set_reaction")["state"] == "already_removed"
+    assert page.evaluate("window.removals||0") == 0
+    assert operate("message_open")["state"] == "toolbar_opening"
+    assert operate("message_picker_open")["state"] == "picker_opening"
+    assert (
+        operate("message_set_reaction", selected=True, requestId="add-eyes")["state"]
+        == "reaction_clicked"
+    )
+    assert operate("message_observe", selected=True, requestId="add-eyes")["state"] == "waiting"
+    page.evaluate("window.now+=2100")
+    assert operate("message_observe", selected=True, requestId="add-eyes")["state"] == "reacted"
+    assert operate("message_set_reaction", expectedText="Edited")["state"] == "message_changed"
+    assert page.evaluate("window.removals||0") == 0
+    assert operate("message_set_reaction")["state"] == "reaction_clicked"
+    assert operate("message_observe")["state"] == "waiting"
+    page.evaluate("window.now+=2100")
+    assert operate("message_observe")["state"] == "removed"
+    assert operate("message_set_reaction")["state"] == "already_removed"
+    assert page.evaluate("window.removals") == 1
+    assert page.evaluate("window.adds") == 1
+    assert page.locator('[data-tid="diverse-reaction-pill-button"]').count() == 1
+    # Disappearing/virtualized content cannot prove removal.
+    page.locator("[data-message-content]").evaluate("e=>e.remove()")
     assert operate("message_observe")["state"] == "reaction_uncertain"
 
 

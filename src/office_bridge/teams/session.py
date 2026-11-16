@@ -63,6 +63,7 @@ def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
         "teams_web_message_link",
         "teams_web_message_reactions",
         "teams_web_react_message",
+        "teams_web_set_reaction",
         "shutdown",
     }:
         raise SessionError("invalid_operation")

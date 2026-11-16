@@ -35,6 +35,7 @@ dev-tasks:
   serve-dev: python scripts/run_server.py --dev
   stop-host: python scripts/stop_teams_session.py
   reload-teams: python scripts/restart_teams_session.py
+  install-skills: python scripts/install_user_skills.py
   verify: python scripts/bootstrap_check.py
   verify-dev: python scripts/bootstrap_check.py --dev
   verify-teams-dev: python scripts/verify_teams_web.py --dev --count 2

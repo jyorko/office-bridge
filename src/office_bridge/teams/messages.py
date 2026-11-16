@@ -24,12 +24,14 @@ class MessageLink(BaseModel):
 class ReactionChoice(BaseModel):
     name: str
     selected: bool
+    emoji_id: str = ""
 
 
 class MessageReactions(BaseModel):
     chat: WebChatRef
     message_id: str
     reactions: list[ReactionChoice]
+    content_text: str = ""
 
 
 class ReactionReceipt(BaseModel):
@@ -69,7 +71,40 @@ def reactions(chat, message_id, expected_text):
     result = _invoke("teams_web_message_reactions", chat, message_id, expected_text=expected_text)
     if result.get("state") != "reactions":
         raise TeamsError("Message reaction choices could not be verified.")
-    return MessageReactions(chat=chat, message_id=message_id, reactions=result["reactions"])
+    return MessageReactions(
+        chat=chat,
+        message_id=message_id,
+        reactions=result["reactions"],
+        content_text=result.get("content_text", ""),
+    )
+
+
+def observe(chat, message_id):
+    """Read current content and controls without reusing historical text."""
+    result = _invoke(
+        "teams_web_message_reactions", chat, message_id, expected_text="", read_current=True
+    )
+    if result.get("state") != "reactions" or not isinstance(result.get("content_text"), str):
+        raise TeamsError("Current message content could not be verified.")
+    return result
+
+
+def set_eyes(chat, message_id, content, selected, request_id):
+    """Internal desired-state transition; lifecycle ownership controls removal."""
+    result = _invoke(
+        "teams_web_set_reaction",
+        chat,
+        message_id,
+        expected_text=content,
+        reaction="Eyes",
+        emoji_id="1f440_eyes",
+        selected=selected,
+        request_id=request_id,
+    )
+    allowed = {"reacted", "already_reacted"} if selected else {"removed", "already_removed"}
+    if result.get("state") not in allowed or result.get("reaction") != "Eyes":
+        raise TeamsError("Eyes transition is uncertain; do not retry.")
+    return result["state"]
 
 
 def react(chat, message_id, expected_text, reaction, request_id):

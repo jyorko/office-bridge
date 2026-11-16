@@ -3,9 +3,9 @@
 from typing import Annotated, Literal
 
 from actions import ActionError, Response, action
-from pydantic import Field
+from pydantic import Field, RootModel
 
-from office_bridge.teams import backend, lookup, messages, service
+from office_bridge.teams import backend, lookup, messages, service, work_tracking
 from office_bridge.teams.messages import MessageLink, MessageReactions, ReactionReceipt
 from office_bridge.teams.models import (
     EditReceipt,
@@ -15,6 +15,13 @@ from office_bridge.teams.models import (
     WebChatRef,
     WebChatSearchResult,
 )
+from office_bridge.teams.work_tracking import Outcome, TrackingPolicy, WorkStatus
+
+
+class TrackingChats(RootModel[list[WebChatRef]]):
+    """Keep nested model definitions attached to the array's schema."""
+
+    root: Annotated[list[WebChatRef], Field(max_length=50)]
 
 
 def _respond(operation, *args):
@@ -179,3 +186,90 @@ def teams_web_react_message(
         request_id: Unique reaction ID; uncertain outcomes cannot be replayed.
     """
     return _respond(messages.react, chat, message_id, expected_text, reaction, request_id)
+
+
+@action(is_consequential=True)
+def teams_work_tracking_configure(
+    session_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+    chats: TrackingChats,
+    enabled: bool,
+) -> Response[TrackingPolicy]:
+    """Opt in to Eyes tracking for an explicitly authorized session and exact chats.
+
+    Eyes is reserved for automation on enrolled task messages. Pre-existing Eyes
+    is preserved. Disabling prevents new claims; authorized cleanup remains allowed.
+    Changing chat scope requires a new session ID. This does not authorize replies.
+
+    Args:
+        session_id: Stable ID for the user-authorized tracking scope.
+        chats: Exact chat references enrolled by the user.
+        enabled: Enable new claims, or disable them while permitting cleanup.
+    """
+    return _respond(work_tracking.configure, session_id, chats.root, enabled)
+
+
+@action(is_consequential=True)
+def teams_work_begin(
+    session_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+    work_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+    chat: WebChatRef,
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")],
+    expected_content: Annotated[str, Field(max_length=2000)],
+) -> Response[WorkStatus]:
+    """Claim an assigned task message and add Eyes only within an opted-in scope.
+
+    Use content_text from message_reactions, excluding reaction summaries.
+    Mark meaningful active investigation, not passive reading or queued work.
+    Reuse work_id for the same claim; completed claims cannot be reactivated.
+    Status failures do not prevent the authorized underlying work.
+
+    Args:
+        session_id: Previously authorized tracking session.
+        work_id: Stable unique ID for this work claim.
+        chat: Exact enrolled chat reference.
+        message_id: Exact task message ID returned by read_chat.
+        expected_content: Current content_text returned by message_reactions.
+    """
+    return _respond(work_tracking.begin, session_id, work_id, chat, message_id, expected_content)
+
+
+@action(is_consequential=True)
+def teams_work_finish(
+    session_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+    work_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+    chat: WebChatRef,
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")],
+    outcome: Outcome,
+) -> Response[WorkStatus]:
+    """Release a claim when work completes, pauses, fails, or is cancelled.
+
+    Only the last active claim may remove Eyes, and only if automation owns it.
+    Interim replies do not finish ongoing investigation. Completed means the
+    requested outcome was verified. No completion reaction or reply is sent.
+    Pending/uncertain transitions block automatic retries across new request IDs.
+
+    Args:
+        session_id: Tracking session that owns the claim.
+        work_id: Exact claim ID used by work_begin.
+        chat: Exact enrolled chat reference.
+        message_id: Exact task message ID used by work_begin.
+        outcome: Verified completion, pause, cancellation, or failure.
+    """
+    return _respond(work_tracking.finish, session_id, work_id, chat, message_id, outcome)
+
+
+@action(is_consequential=False)
+def teams_work_status(
+    chat: WebChatRef,
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")],
+) -> Response[WorkStatus]:
+    """Reconcile durable claims after worker replacement or a crash without clicking.
+
+    Inspect active claims and ownership before resuming. Finish known abandoned
+    claims explicitly; a stale claim never implies success or expires automatically.
+
+    Args:
+        chat: Exact tracked chat reference.
+        message_id: Exact task message ID used by work_begin.
+    """
+    return _respond(work_tracking.status, chat, message_id)

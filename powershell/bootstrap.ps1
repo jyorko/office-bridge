@@ -66,6 +66,9 @@ try {
     }
     Write-Output "WebView2 Runtime available: $browserVersion"
 
+    & $actionServer devenv --datadir $taskData task install-skills
+    if ($LASTEXITCODE -ne 0) { throw 'User skill installation failed; existing skill edits were preserved.' }
+
     if ($PrepareOnly) {
         Write-Output 'Bootstrap prerequisites are prepared. Run bootstrap.ps1 again without -PrepareOnly to verify and start the service.'
         return

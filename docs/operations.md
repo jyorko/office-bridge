@@ -8,7 +8,7 @@ The server binds to `127.0.0.1` and runs hidden under the current Windows accoun
 
 Each start, including reuse of a running server, verifies reads and refreshes both client entries. Codex uses `$CODEX_HOME/config.toml` or `~/.codex/config.toml`; Copilot uses `$COPILOT_HOME/mcp-config.json` or `~/.copilot/mcp-config.json`, following the [native Copilot configuration format](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration). Both files are parsed before any write. Registration removes `desktop-office`, verifies its absence, writes the new endpoint without authorization headers, and reads it back. Other entries and settings are preserved; Codex comments are retained. Atomic writes reject concurrent edits and retain no backups. Verification evidence must match the current endpoint, reload mode, and server instance. Restart or reconnect an already-running client if it retains an older configuration in memory.
 
-Python action changes reload automatically in development. The host refreshes JavaScript between operations; an operation stops if its script bundle changes during execution. After changing the native C# host, run `action-server devenv --datadir .state/tasks task reload-teams`, then `action-server devenv --datadir .state/tasks task verify-teams-dev`. This reloads the isolated Teams host while the server UI stays available. The supervisor limits starts to three per five minutes; if recovery stops, use the normal server stop/start commands. Check `teams_web_status.restart_required` before sends.
+Python action changes reload automatically in development. Each Teams host loads an immutable native/JavaScript code snapshot in its private application directory. Editing repository sources does not invalidate operational reads. After changing native C# or JavaScript, run `action-server devenv --datadir .state/tasks task reload-teams`, then `action-server devenv --datadir .state/tasks task verify-teams-dev`. This reloads the isolated Teams host while the server UI stays available. The supervisor limits starts to three per five minutes; if recovery stops, use the normal server stop/start commands. Check `teams_web_status.restart_required` before sends; unexpected changes to the loaded private snapshot still stop operations.
 
 ## Copilot Work IQ
 
@@ -53,6 +53,20 @@ To edit an existing message, pass its exact `message_id`, the same chat referenc
 Editing preserves an unchanged mention at the start of the existing message. Changing that mention or editing a message with mentions elsewhere is refused. Creating notification mentions is not part of the Markdown interface.
 
 The optional desktop Teams tools use Windows UI Automation. Reading the current chat can work in the background, but navigation that would activate Teams is refused. Do not relax that protection to make a test pass.
+
+## Eyes work tracking
+
+Tracking is disabled until the user authorizes a session and exact chats through `teams_work_tracking_configure(session_id, chats, enabled=true)`. On enrolled task messages, Eyes is reserved for automation. An existing Eyes reaction is never claimed or removed. The same signed-in account is used by humans and agents; a manual remove-and-re-add between observations cannot be distinguished reliably, so avoid manually changing Eyes on enrolled messages. Detected interference stops automatic changes.
+
+Use `teams_web_message_reactions` to obtain `content_text`, which excludes reaction summaries. Call `teams_work_begin` with a stable session/work ID, exact chat/message identity, and that expected content when meaningful investigation starts. Passive reading, queued requests, and unrelated messages do not need a marker. The action records a durable claim even when Eyes is unavailable; a warning lets the agent continue its authorized work without a reaction.
+
+Call `teams_work_finish` with `completed`, `paused`, `cancelled`, or `failed` when the claim ends. An interim reply does not end continuing investigation. Only the last active claim can clear an owned marker. `completed` means the requested result was verified; it does not add a completion emoji or send a reply. Configure scopes once rather than asking again for each authorized transition. Disabling a session blocks new claims while retaining permission to clean its existing owned markers.
+
+`teams_work_status` reconciles durable records and current observations without clicking. Claims survive disposable workers and crashes and never expire automatically. Finish known abandoned claims explicitly with their actual outcome. A crash before a cleanup reservation can be reconciled by finishing that same ended claim again. Pending/uncertain transitions block every new request ID; they must not be retried. Changed task content or externally changed Eyes stops cleanup. Cached receipts describe historical operations, not current UI state.
+
+Private tracking data is stored under `%LOCALAPPDATA%/OfficeActionServer/teams-web-sends/work-tracking`, partitioned by configured account and exact message. Each message has a coordinator lock, claims, baseline content, ownership, and durably reserved transition generations. Account configuration changes require the managed server to restart. Full user-requested resets remove these records with the rest of device state.
+
+This is an MCP lifecycle agents invoke for assigned work, not a chat monitor or background lease cleaner. No existing conversation is enrolled during installation or verification. General reaction removal is not exposed; the lifecycle only removes Eyes it owns.
 
 ## Verification and API reference
 

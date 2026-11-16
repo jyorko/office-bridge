@@ -1092,7 +1092,7 @@ public sealed class TeamsSession : ApplicationContext
             return new Dictionary<string, object> { { "shutdown", true } };
         }
         if (op == "teams_web_message_link" || op == "teams_web_message_reactions" ||
-            op == "teams_web_react_message")
+            op == "teams_web_react_message" || op == "teams_web_set_reaction")
             return await MessageAction(op, request["arguments"] as Dictionary<string, object>);
         if (op == "teams_web_list_chats" || op == "teams_web_read_chat" ||
             op == "teams_web_send_chat" || op == "teams_web_inspect_message" ||
@@ -1232,7 +1232,15 @@ public sealed class TeamsSession : ApplicationContext
         string expected = args.TryGetValue("expected_text", out rawExpected) ? rawExpected as string : null;
         string reaction = args.TryGetValue("reaction", out rawReaction) ? rawReaction as string : null;
         string id = args.TryGetValue("request_id", out rawId) ? rawId as string : null;
-        bool mutate = operation == "teams_web_react_message";
+        bool desiredState = operation == "teams_web_set_reaction";
+        bool mutate = operation == "teams_web_react_message" || desiredState;
+        object rawSelected, rawEmoji;
+        bool selected = !desiredState || (args.TryGetValue("selected", out rawSelected) &&
+            rawSelected is bool && (bool)rawSelected);
+        string emojiId = args.TryGetValue("emoji_id", out rawEmoji) ? rawEmoji as string : null;
+        if (desiredState && (!args.ContainsKey("selected") || !(args["selected"] is bool) ||
+            emojiId != "1f440_eyes" || reaction != "Eyes"))
+            throw new InvalidDataException();
         if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
             !Regex.IsMatch(messageId ?? "", "^message-body-[0-9]{13}$") ||
             (operation != "teams_web_message_link" && (expected == null || expected.Length > 2000)) ||
@@ -1245,6 +1253,8 @@ public sealed class TeamsSession : ApplicationContext
         var request = new Dictionary<string, object> {
             { "chatId", chatId }, { "title", title }, { "messageId", messageId },
             { "expectedText", expected }, { "reaction", reaction }, { "requestId", id },
+            { "selected", selected }, { "emojiId", emojiId }, { "contentOnly", desiredState },
+            { "readCurrent", !mutate && Flag(args, "read_current") },
             { "phase", operation == "teams_web_message_link" ? "message_link" : "message_hover" }
         };
         string operationPhase = Convert.ToString(request["phase"]);
@@ -1285,15 +1295,17 @@ public sealed class TeamsSession : ApplicationContext
             throw new InvalidOperationException("primary_state_changed");
         request["phase"] = "message_reactions";
         result = await RunChat(context.Core, request);
-        request["phase"] = "message_picker_open";
-        var pickerOpened = await RunChat(context.Core, request);
-        if (Convert.ToString(pickerOpened["state"]) == "picker_opening") {
-            request["phase"] = "message_reactions";
-            var pickerDeadline = DateTime.UtcNow.AddSeconds(3);
-            do {
-                await Task.Delay(150);
-                result = await RunChat(context.Core, request);
-            } while (!Flag(result, "picker_ready") && DateTime.UtcNow < pickerDeadline);
+        if (!desiredState || selected) {
+            request["phase"] = "message_picker_open";
+            var pickerOpened = await RunChat(context.Core, request);
+            if (Convert.ToString(pickerOpened["state"]) == "picker_opening") {
+                request["phase"] = "message_reactions";
+                var pickerDeadline = DateTime.UtcNow.AddSeconds(3);
+                do {
+                    await Task.Delay(150);
+                    result = await RunChat(context.Core, request);
+                } while (!Flag(result, "picker_ready") && DateTime.UtcNow < pickerDeadline);
+            }
         }
         if (mutate) {
         string claims = Path.Combine(Path.GetDirectoryName(profile), "teams-web-sends", "reactions");
@@ -1308,7 +1320,7 @@ public sealed class TeamsSession : ApplicationContext
             claim.Write(bytes, 0, bytes.Length);
             claim.Flush(true);
         }
-        request["phase"] = "message_react";
+        request["phase"] = desiredState ? "message_set_reaction" : "message_react";
         result = await RunChat(context.Core, request);
         var deadline = DateTime.UtcNow.AddSeconds(8);
         if (Convert.ToString(result["state"]) == "reaction_clicked")

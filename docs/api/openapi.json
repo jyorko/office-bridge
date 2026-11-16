@@ -7328,6 +7328,11 @@
                                   "selected": {
                                     "type": "boolean",
                                     "title": "Selected"
+                                  },
+                                  "emoji_id": {
+                                    "type": "string",
+                                    "title": "Emoji Id",
+                                    "default": ""
                                   }
                                 },
                                 "type": "object",
@@ -7339,6 +7344,11 @@
                               },
                               "type": "array",
                               "title": "Reactions"
+                            },
+                            "content_text": {
+                              "type": "string",
+                              "title": "Content Text",
+                              "default": ""
                             }
                           },
                           "type": "object",
@@ -7552,6 +7562,799 @@
           }
         },
         "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-work-tracking-configure/run": {
+      "post": {
+        "summary": "Teams Work Tracking Configure",
+        "description": "Opt in to Eyes tracking for an explicitly authorized session and exact chats.\nEyes is reserved for automation on enrolled task messages. Pre-existing Eyes\nis preserved. Disabling prevents new claims; authorized cleanup remains allowed.\nChanging chat scope requires a new session ID. This does not authorize replies.",
+        "operationId": "teams_work_tracking_configure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "title": "Session Id",
+                    "description": "Stable ID for the user-authorized tracking scope."
+                  },
+                  "chats": {
+                    "items": {
+                      "properties": {
+                        "chat_id": {
+                          "type": "string",
+                          "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                          "title": "Chat Id"
+                        },
+                        "title": {
+                          "type": "string",
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "title": "Title"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "chat_id",
+                        "title"
+                      ],
+                      "title": "WebChatRef"
+                    },
+                    "type": "array",
+                    "maxItems": 50,
+                    "title": "Chats",
+                    "description": "Exact chat references enrolled by the user."
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "title": "Enabled",
+                    "description": "Enable new claims, or disable them while permitting cleanup."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "session_id",
+                  "chats",
+                  "enabled"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "session_id": {
+                              "type": "string",
+                              "title": "Session Id"
+                            },
+                            "enabled": {
+                              "type": "boolean",
+                              "title": "Enabled"
+                            },
+                            "chats": {
+                              "items": {
+                                "properties": {
+                                  "chat_id": {
+                                    "type": "string",
+                                    "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                    "title": "Chat Id"
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "title": "Title"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "type": "object",
+                                "required": [
+                                  "chat_id",
+                                  "title"
+                                ],
+                                "title": "WebChatRef"
+                              },
+                              "type": "array",
+                              "title": "Chats"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "session_id",
+                            "enabled",
+                            "chats"
+                          ],
+                          "title": "TrackingPolicy"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Work Tracking Configure"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-work-begin/run": {
+      "post": {
+        "summary": "Teams Work Begin",
+        "description": "Claim an assigned task message and add Eyes only within an opted-in scope.\nUse content_text from message_reactions, excluding reaction summaries.\nMark meaningful active investigation, not passive reading or queued work.\nReuse work_id for the same claim; completed claims cannot be reactivated.\nStatus failures do not prevent the authorized underlying work.",
+        "operationId": "teams_work_begin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "title": "Session Id",
+                    "description": "Previously authorized tracking session."
+                  },
+                  "work_id": {
+                    "type": "string",
+                    "title": "Work Id",
+                    "description": "Stable unique ID for this work claim."
+                  },
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact enrolled chat reference."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Exact task message ID returned by read_chat."
+                  },
+                  "expected_content": {
+                    "type": "string",
+                    "title": "Expected Content",
+                    "description": "Current content_text returned by message_reactions."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "session_id",
+                  "work_id",
+                  "chat",
+                  "message_id",
+                  "expected_content"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "title": "Message Id"
+                            },
+                            "marker": {
+                              "type": "string",
+                              "enum": [
+                                "unmarked",
+                                "owned",
+                                "preexisting",
+                                "cleared",
+                                "pending",
+                                "uncertain",
+                                "interference"
+                              ],
+                              "title": "Marker"
+                            },
+                            "active_claims": {
+                              "type": "integer",
+                              "title": "Active Claims"
+                            },
+                            "claims": {
+                              "items": {
+                                "properties": {
+                                  "session_id": {
+                                    "type": "string",
+                                    "title": "Session Id"
+                                  },
+                                  "work_id": {
+                                    "type": "string",
+                                    "title": "Work Id"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "active",
+                                      "completed",
+                                      "paused",
+                                      "cancelled",
+                                      "failed"
+                                    ],
+                                    "title": "Outcome"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "session_id",
+                                  "work_id",
+                                  "outcome"
+                                ],
+                                "title": "WorkClaim"
+                              },
+                              "type": "array",
+                              "title": "Claims"
+                            },
+                            "warning": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Warning"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "chat",
+                            "message_id",
+                            "marker",
+                            "active_claims",
+                            "claims"
+                          ],
+                          "title": "WorkStatus"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Work Begin"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-work-finish/run": {
+      "post": {
+        "summary": "Teams Work Finish",
+        "description": "Release a claim when work completes, pauses, fails, or is cancelled.\nOnly the last active claim may remove Eyes, and only if automation owns it.\nInterim replies do not finish ongoing investigation. Completed means the\nrequested outcome was verified. No completion reaction or reply is sent.\nPending/uncertain transitions block automatic retries across new request IDs.",
+        "operationId": "teams_work_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "title": "Session Id",
+                    "description": "Tracking session that owns the claim."
+                  },
+                  "work_id": {
+                    "type": "string",
+                    "title": "Work Id",
+                    "description": "Exact claim ID used by work_begin."
+                  },
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact enrolled chat reference."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Exact task message ID used by work_begin."
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "paused",
+                      "cancelled",
+                      "failed"
+                    ],
+                    "title": "Outcome",
+                    "description": "Verified completion, pause, cancellation, or failure."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "session_id",
+                  "work_id",
+                  "chat",
+                  "message_id",
+                  "outcome"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "title": "Message Id"
+                            },
+                            "marker": {
+                              "type": "string",
+                              "enum": [
+                                "unmarked",
+                                "owned",
+                                "preexisting",
+                                "cleared",
+                                "pending",
+                                "uncertain",
+                                "interference"
+                              ],
+                              "title": "Marker"
+                            },
+                            "active_claims": {
+                              "type": "integer",
+                              "title": "Active Claims"
+                            },
+                            "claims": {
+                              "items": {
+                                "properties": {
+                                  "session_id": {
+                                    "type": "string",
+                                    "title": "Session Id"
+                                  },
+                                  "work_id": {
+                                    "type": "string",
+                                    "title": "Work Id"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "active",
+                                      "completed",
+                                      "paused",
+                                      "cancelled",
+                                      "failed"
+                                    ],
+                                    "title": "Outcome"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "session_id",
+                                  "work_id",
+                                  "outcome"
+                                ],
+                                "title": "WorkClaim"
+                              },
+                              "type": "array",
+                              "title": "Claims"
+                            },
+                            "warning": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Warning"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "chat",
+                            "message_id",
+                            "marker",
+                            "active_claims",
+                            "claims"
+                          ],
+                          "title": "WorkStatus"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Work Finish"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-work-status/run": {
+      "post": {
+        "summary": "Teams Work Status",
+        "description": "Reconcile durable claims after worker replacement or a crash without clicking.\nInspect active claims and ownership before resuming. Finish known abandoned\nclaims explicitly; a stale claim never implies success or expires automatically.",
+        "operationId": "teams_work_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact tracked chat reference."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Exact task message ID used by work_begin."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "message_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "title": "Message Id"
+                            },
+                            "marker": {
+                              "type": "string",
+                              "enum": [
+                                "unmarked",
+                                "owned",
+                                "preexisting",
+                                "cleared",
+                                "pending",
+                                "uncertain",
+                                "interference"
+                              ],
+                              "title": "Marker"
+                            },
+                            "active_claims": {
+                              "type": "integer",
+                              "title": "Active Claims"
+                            },
+                            "claims": {
+                              "items": {
+                                "properties": {
+                                  "session_id": {
+                                    "type": "string",
+                                    "title": "Session Id"
+                                  },
+                                  "work_id": {
+                                    "type": "string",
+                                    "title": "Work Id"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "active",
+                                      "completed",
+                                      "paused",
+                                      "cancelled",
+                                      "failed"
+                                    ],
+                                    "title": "Outcome"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "session_id",
+                                  "work_id",
+                                  "outcome"
+                                ],
+                                "title": "WorkClaim"
+                              },
+                              "type": "array",
+                              "title": "Claims"
+                            },
+                            "warning": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Warning"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "chat",
+                            "message_id",
+                            "marker",
+                            "active_claims",
+                            "claims"
+                          ],
+                          "title": "WorkStatus"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Work Status"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
         "x-operation-kind": "action"
       }
     }

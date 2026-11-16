@@ -15,14 +15,16 @@
     const leaves = Array.from(row.querySelectorAll('*'))
         .filter(e => e.children.length === 0 && e.textContent.trim())
         .map(e => e.textContent.trim())
-        .filter(t => t.length <= 120 && !/^\d{1,2}:\d{2}\s?(AM|PM)?$/i.test(t));
+        .filter(t => t.length <= 120 && t !== 'Unread' &&
+          !/^\d{1,2}:\d{2}\s?(AM|PM)?$/i.test(t));
     return leaves[0] || '';
   };
   const rows = () => Array.from(document.querySelectorAll('[role="treeitem"]'))
       .filter(e => rowId(e) && rowTitle(e))
       .filter(e => !Array.from(e.querySelectorAll('[role="treeitem"]')).some(n => rowId(n)));
-  const exactRows = () => rows().filter(e => rowTitle(e) === title);
-  const matchingRows = () => exactRows().filter(e => rowId(e) === chatId);
+  // Rail text includes badges and previews. Navigate by its stable ID; the opened
+  // header below independently verifies both the exact ID and requested title.
+  const matchingRows = () => rows().filter(e => rowId(e) === chatId);
   const header = document.querySelector('[data-tid="chat-title"]');
   const headerMatches = () => !!header && header.textContent.trim() === title &&
       !!document.getElementById('chat-header-' + chatId);
@@ -241,8 +243,9 @@
       url:'https://teams.microsoft.com/l/message/'+encodeURIComponent(chatId)+'/'+
         messageId.slice('message-body-'.length)+'?context='+encodeURIComponent('{"contextType":"chat"}')};
     const contentText=()=> (message.querySelector('[data-message-content]') || message).innerText;
-    if (phase!=='message_observe' &&
-        (typeof expectedText!=='string' || message.innerText!==expectedText))
+    if (phase!=='message_observe' && !request.readCurrent &&
+        (typeof expectedText!=='string' ||
+         (request.contentOnly?contentText():message.innerText)!==expectedText))
       return {state:'message_changed'};
     const root=message.closest('[data-tid="chat-pane-item"]');
     if (!root || root.querySelectorAll('[data-tid="chat-pane-message"]').length!==1)
@@ -305,24 +308,52 @@
       return label.startsWith('Undo ') && chosen(itemId(e)) ? label.slice(5) : label;
     };
     const all=[...available,...emoji];
-    if (phase==='message_reactions') return {...result,state:'reactions',picker_ready:emoji.length>0,
-      reactions:all.map(e=>({name:name(e),selected:selected(e)||chosen(itemId(e))}))
-        .filter((e,i,a)=>a.findIndex(other=>other.name===e.name)===i)};
+    if (phase==='message_reactions') {
+      const reactions=all.map(e=>({name:name(e),selected:selected(e)||chosen(itemId(e)),emoji_id:itemId(e)}))
+        .filter((e,i,a)=>a.findIndex(other=>other.name===e.name)===i);
+      const eyes=pills('1f440_eyes');
+      if (!reactions.some(e=>e.emoji_id==='1f440_eyes') && eyes.length===1 &&
+          ['true','false'].includes(eyes[0].getAttribute('aria-pressed')))
+        reactions.push({name:'Eyes',selected:selected(eyes[0]),emoji_id:'1f440_eyes'});
+      return {...result,state:'reactions',content_text:contentText(),
+        picker_ready:emoji.length>0,reactions};
+    }
     if (phase==='message_observe') {
       const prior=window.__officeReaction;
       if (!prior || prior.id!==requestId || prior.chatId!==chatId || prior.title!==title ||
           prior.messageId!==messageId || prior.reaction!==request.reaction ||
           prior.content!==contentText()) return {state:'reaction_uncertain'};
-      const settled=chosen(prior.itemId) ||
-        available.some(e=>name(e)===prior.reaction && selected(e));
+      const pill=pills(prior.itemId);
+      const control=available.find(e=>itemId(e)===prior.itemId);
+      const isSelected=chosen(prior.itemId) || !!control && selected(control);
+      // Removal needs a still-rendered content node and either an explicit false
+      // control or a settled absence of this reaction's pill.
+      const settled=prior.desired?isSelected:
+        !isSelected && (!!message.querySelector('[data-message-content]') ||
+          !!control && control.getAttribute('aria-pressed')==='false') &&
+        pill.every(e=>e.getAttribute('aria-pressed')==='false');
       if (!settled) {prior.stableSince=0;return {state:'waiting'};}
       if (!prior.stableSince) {prior.stableSince=Date.now();return {state:'waiting'};}
       return Date.now()-prior.stableSince>=2000?
-        {...result,state:'reacted',reaction:request.reaction}:{state:'waiting'};
+        {...result,state:prior.desired?'reacted':'removed',reaction:request.reaction}:{state:'waiting'};
+    }
+    if (phase==='message_set_reaction' && request.selected===false) {
+      const own=pills(request.emojiId);
+      if (own.length>1 || own.some(e=>!['true','false'].includes(e.getAttribute('aria-pressed'))))
+        return {state:'reaction_uncertain'};
+      if (!message.querySelector('[data-message-content]')) return {state:'reaction_unavailable'};
+      if (!own.some(selected)) return {...result,state:'already_removed',reaction:request.reaction};
+      if (window.__officeReaction?.id===requestId) return {state:'reaction_uncertain'};
+      window.__officeReaction={id:requestId,chatId,title,messageId,reaction:request.reaction,
+        itemId:request.emojiId,content:contentText(),desired:false};
+      own[0].click();
+      return {...result,state:'reaction_clicked'};
     }
     const matches=all.filter(e=>name(e)===request.reaction);
     if (matches.length!==1) return {state:'reaction_unavailable'};
-    if (phase==='message_react') {
+    if (phase==='message_react' || phase==='message_set_reaction') {
+      if (phase==='message_set_reaction' && itemId(matches[0])!==request.emojiId)
+        return {state:'reaction_unavailable'};
       if (!emoji.includes(matches[0]) && !['true','false'].includes(matches[0].getAttribute('aria-pressed')||
           matches[0].getAttribute('aria-checked'))) return {state:'reaction_unavailable'};
       if (selected(matches[0])||chosen(itemId(matches[0])))
@@ -330,7 +361,7 @@
       const prior=window.__officeReaction;
       if (prior && prior.id===requestId) return {state:'reaction_uncertain'};
       window.__officeReaction={id:requestId,chatId,title,messageId,reaction:request.reaction,
-        itemId:itemId(matches[0]),content:contentText()};
+        itemId:itemId(matches[0]),content:contentText(),desired:true};
       matches[0].click();
       return {...result,state:'reaction_clicked'};
     }
