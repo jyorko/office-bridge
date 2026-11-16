@@ -10,7 +10,7 @@ dependencies:
     - markdown-it-py=4.3.0
     - pydantic=2.14.3
     - robocorp-browser=2.4.0
-    # - playwright=1.65.1
+
 pythonpath:
   - src
 dev-dependencies:
