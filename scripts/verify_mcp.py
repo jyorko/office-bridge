@@ -1,13 +1,13 @@
 """Exercise HTTP MCP discovery and desktop reads without changing mailbox items."""
 
 import json
-import time
 
-import requests
 from _bootstrap import ROOT
+from bootstrap_check import wait_for_server
 from mcp_client import MCPClient, unwrap
 
-URL = "http://127.0.0.1:8766/mcp"
+from office_bridge.runtime.endpoint import mcp_url
+
 EXPECTED = {
     "outlook_inbox_list",
     "outlook_get_message",
@@ -22,28 +22,9 @@ EXPECTED = {
 
 
 def main():
-    probe = requests.Session()
-    probe.trust_env = False
-    probe.headers.pop("Authorization", None)
-    probe.headers.update(
-        {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
-    )
-    assert "Authorization" not in probe.headers
-    for attempt in range(45):
-        try:
-            denied = probe.post(
-                URL, json={"jsonrpc": "2.0", "method": "tools/list", "id": 0}, timeout=2
-            )
-            break
-        except requests.ConnectionError:
-            if attempt == 44:
-                raise SystemExit("Action Server did not become ready within 45 seconds.")
-            time.sleep(1)
-    assert denied.status_code in (401, 403), "MCP accepted unauthenticated access"
-    probe.close()
-
-    token = (ROOT / ".state/.api_key").read_text().strip()
-    with MCPClient(token) as client:
+    url = mcp_url(ROOT)
+    wait_for_server(600)
+    with MCPClient() as client:
         tools = client.tools()
         names = {}
         for expected in EXPECTED:
@@ -51,8 +32,8 @@ def main():
             assert len(matches) == 1, f"Missing or ambiguous tool: {expected}"
             names[expected] = matches[0]
         report = {
-            "authenticated": True,
-            "unauthenticated_status": denied.status_code,
+            "mcp_url": url,
+            "api_key_required": False,
             "protocol": client.protocol,
             "tools": list(names),
             "checks": [],

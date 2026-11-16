@@ -8,7 +8,7 @@ import requests
 from _bootstrap import ROOT
 from mcp_client import MCPClient, unwrap
 
-URL = "http://127.0.0.1:8766/mcp"
+from office_bridge.runtime.endpoint import base_url, mcp_url, server_record
 
 
 def wait_for_server(timeout: int) -> None:
@@ -17,10 +17,10 @@ def wait_for_server(timeout: int) -> None:
         client.trust_env = False
         while time.monotonic() < deadline:
             try:
-                reply = client.get("http://127.0.0.1:8766/openapi.json", timeout=2)
+                reply = client.get(base_url(ROOT) + "/openapi.json", timeout=2)
                 if reply.status_code == 200:
                     return
-            except requests.RequestException:
+            except (requests.RequestException, RuntimeError):
                 pass
             time.sleep(1)
     raise RuntimeError("Server did not become ready; inspect .state/server.stderr.log")
@@ -28,17 +28,8 @@ def wait_for_server(timeout: int) -> None:
 
 def verify(*, dev: bool, timeout: int = 600) -> dict:
     wait_for_server(timeout)
-    token = None if dev else (ROOT / ".state/.api_key").read_text().strip()
-    with requests.Session() as probe:
-        probe.trust_env = False
-        reply = probe.post(
-            URL, json={"jsonrpc": "2.0", "method": "tools/list", "id": 1}, timeout=10
-        )
-        denied = reply.status_code in (401, 403)
-    if not dev and not denied:
-        raise RuntimeError("Authenticated server accepted an unauthenticated MCP request")
-
-    with MCPClient(token) as client:
+    record = server_record(ROOT)
+    with MCPClient() as client:
         tools = client.tools()
 
         def tool(suffix):
@@ -71,8 +62,8 @@ def verify(*, dev: bool, timeout: int = 600) -> dict:
         report = {
             "verified": False,
             "dev": dev,
-            "mcp_url": URL,
-            "authenticated": not dev and denied,
+            "mcp_url": mcp_url(ROOT),
+            "server_instance": record["instance"],
             "tool_count": len(tools),
             "teams_state": status["state"],
             "teams_account_verified": status.get("account_verified") is True,

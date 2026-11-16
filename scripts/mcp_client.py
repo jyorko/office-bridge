@@ -3,6 +3,7 @@
 import json
 
 import requests
+from _bootstrap import ROOT
 from mcp.shared.inbound import encode_header_value
 from mcp_types import (
     CLIENT_CAPABILITIES_META_KEY,
@@ -10,7 +11,7 @@ from mcp_types import (
     PROTOCOL_VERSION_META_KEY,
 )
 
-URL = "http://127.0.0.1:8766/mcp"
+from office_bridge.runtime.endpoint import mcp_url
 
 
 def decode(response):
@@ -26,14 +27,13 @@ def decode(response):
 
 
 class MCPClient:
-    def __init__(self, token: str | None = None):
+    def __init__(self):
+        self.url = mcp_url(ROOT)
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.headers.update(
             {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
         )
-        if token:
-            self.session.headers["Authorization"] = "Bearer " + token
         self.next_id = 1
         self.protocol = "2026-07-28"
         self.session.headers["MCP-Protocol-Version"] = self.protocol
@@ -65,7 +65,7 @@ class MCPClient:
             name = params["uri" if method == "resources/read" else "name"]
             headers["MCP-Name"] = encode_header_value(name)
         message = {"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params}
-        reply = decode(self.session.post(URL, json=message, headers=headers, timeout=120))
+        reply = decode(self.session.post(self.url, json=message, headers=headers, timeout=120))
         if "error" in reply:
             raise RuntimeError(f"MCP {method} failed: {reply['error'].get('code')}")
         return reply["result"]

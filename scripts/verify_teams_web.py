@@ -11,8 +11,7 @@ from mcp_client import MCPClient, unwrap
 
 
 def check_status(dev: bool, backend: str | None = None) -> dict:
-    token = None if dev else (ROOT / ".state/.api_key").read_text().strip()
-    with MCPClient(token) as client:
+    with MCPClient() as client:
         names = [
             tool["name"] for tool in client.tools() if tool["name"].endswith("teams_web_status")
         ]
@@ -28,7 +27,7 @@ def check_status(dev: bool, backend: str | None = None) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--dev", action="store_true", help="Use the local development endpoint without credentials."
+        "--dev", action="store_true", help="Verify a server running with auto-reload."
     )
     parser.add_argument("--count", type=int, choices=range(1, 11), default=2)
     parser.add_argument("--backend", choices=("webview2", "chromium", "msedge"))

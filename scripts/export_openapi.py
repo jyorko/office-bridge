@@ -5,6 +5,8 @@ import json
 import requests
 from _bootstrap import ROOT
 
+from office_bridge.runtime.endpoint import base_url
+
 
 def order_like(value, previous):
     if isinstance(value, dict) and isinstance(previous, dict):
@@ -24,7 +26,7 @@ def main():
     destination = ROOT / "docs/api/openapi.json"
     with requests.Session() as client:
         client.trust_env = False
-        response = client.get("http://127.0.0.1:8766/openapi.json", timeout=15)
+        response = client.get(base_url(ROOT) + "/openapi.json", timeout=15)
         response.raise_for_status()
         schema = response.json()
     if schema.get("openapi") != "3.1.0" or not isinstance(schema.get("paths"), dict):

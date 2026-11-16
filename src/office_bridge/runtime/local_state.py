@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import secrets
 import tempfile
 from pathlib import Path
 
@@ -94,13 +93,6 @@ def _prepare_settings(config: Path, teams_account: str | None) -> Path:
     return path
 
 
-def _create(path: Path, content: str) -> None:
-    with path.open("x", encoding="utf-8") as stream:
-        stream.write(content)
-        stream.flush()
-        os.fsync(stream.fileno())
-
-
 def prepare(
     root: Path,
     *,
@@ -108,30 +100,13 @@ def prepare(
     config: Path | None = None,
     teams_account: str | None = None,
 ) -> Path:
-    """Load or set the persistent work account and preserve existing API credentials."""
+    """Prepare the work account for a loopback server without API credentials."""
     config = config if config is not None else config_directory()
     config.mkdir(parents=True, exist_ok=True)
     state = root / ".state"
     state.mkdir(parents=True, exist_ok=True)
     settings = _prepare_settings(config, teams_account)
 
-    key = config / ".api_key"
-    legacy_key = state / ".api_key"
-    if not key.exists():
-        if legacy_key.exists():
-            value = legacy_key.read_text(encoding="utf-8").strip()
-            if len(value) < 32:
-                raise ValueError("Existing API key is invalid; it was not replaced")
-            _create(key, value)
-        elif not dev:
-            _create(key, secrets.token_urlsafe(32))
-    if key.exists():
-        value = key.read_text(encoding="utf-8").strip()
-        if len(value) < 32:
-            raise ValueError("Device API key is invalid; it was not replaced")
-        if legacy_key.exists():
-            if legacy_key.read_text(encoding="utf-8").strip() != value:
-                raise ValueError("Checkout and device API keys differ; neither was replaced")
-        else:
-            _create(legacy_key, value)
+    (config / ".api_key").unlink(missing_ok=True)
+    (state / ".api_key").unlink(missing_ok=True)
     return settings

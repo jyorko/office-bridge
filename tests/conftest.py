@@ -7,10 +7,11 @@ from playwright.sync_api import sync_playwright
 
 @pytest.fixture(scope="session")
 def isolated_browser():
-    executable = (
+    default = (
         Path(os.environ.get("LOCALAPPDATA", ""))
         / "robocorp/playwright/chromium-1254/chrome-win64/chrome.exe"
     )
+    executable = Path(os.environ.get("OFFICE_BRIDGE_TEST_BROWSER", str(default)))
     if not executable.is_file():
         pytest.skip("isolated Chromium test browser is not installed")
     with sync_playwright() as playwright:

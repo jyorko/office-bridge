@@ -19,11 +19,13 @@ if ($process) {
     $oldActionsHome = $env:ACTIONS_HOME
     $hadActionsHome = Test-Path Env:ACTIONS_HOME
     try {
+        Push-Location -LiteralPath $taskRoot
         if ([string]::IsNullOrWhiteSpace($env:ACTIONS_HOME)) { $env:ACTIONS_HOME = Join-Path $env:LOCALAPPDATA 'OfficeActionServer\rcc-actions' }
         & $actionServer devenv --datadir $taskData task stop-host
         if ($LASTEXITCODE -ne 0) { throw 'Managed graceful Teams host shutdown failed; server process tree was left running.' }
     } finally {
         if ($hadActionsHome) { $env:ACTIONS_HOME = $oldActionsHome } else { Remove-Item Env:ACTIONS_HOME -ErrorAction SilentlyContinue }
+        Pop-Location
     }
     $kill = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\taskkill.exe') -ArgumentList @('/PID', [string]$serverPid, '/T', '/F') -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $stateDir 'stop.stdout.log') -RedirectStandardError (Join-Path $stateDir 'stop.stderr.log')
     $remaining = Get-CimInstance Win32_Process -Filter "ProcessId = $serverPid" -ErrorAction SilentlyContinue

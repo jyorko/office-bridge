@@ -34,7 +34,7 @@ def main():
     if result.returncode:
         raise SystemExit("Could not restrict device configuration access")
     prepare(ROOT, dev=args.dev, teams_account=teams_account)
-    print("Private device configuration prepared; existing credentials preserved.")
+    print("Private account configuration prepared; no API key is used.")
 
 
 if __name__ == "__main__":

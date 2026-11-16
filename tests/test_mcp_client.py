@@ -1,7 +1,18 @@
+import json
 from copy import deepcopy
 
 import pytest
 from mcp_client import MCPClient
+
+
+@pytest.fixture(autouse=True)
+def recorded_endpoint(tmp_path, monkeypatch):
+    state = tmp_path / ".state"
+    state.mkdir()
+    (state / "server.json").write_text(
+        json.dumps({"mcp_url": "http://127.0.0.1:49127/mcp", "instance": "fixture"})
+    )
+    monkeypatch.setattr("mcp_client.ROOT", tmp_path)
 
 
 class Reply:
@@ -43,6 +54,8 @@ def test_modern_mcp_discovery_paging_and_per_request_metadata(monkeypatch):
     session = Session()
     monkeypatch.setattr("mcp_client.requests.Session", lambda: session)
     with MCPClient() as client:
+        assert client.url == "http://127.0.0.1:49127/mcp"
+        assert "Authorization" not in session.headers
         assert [item["name"] for item in client.tools()] == ["first", "second"]
         arguments = {"chat": "test"}
         client.call("read_chat", arguments)

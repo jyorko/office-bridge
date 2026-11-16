@@ -1,8 +1,10 @@
 param(
     [switch]$Dev,
     [switch]$SkipCodex,
+    [switch]$SkipCopilot,
     [switch]$PrepareOnly,
-    [string]$TeamsAccount
+    [string]$TeamsAccount,
+    [ValidateRange(0, 65535)][int]$Port = 8766
 )
 $ErrorActionPreference = 'Stop'
 Push-Location -LiteralPath $PSScriptRoot

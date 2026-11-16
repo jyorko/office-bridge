@@ -1,8 +1,10 @@
 param(
     [switch]$Dev,
     [switch]$SkipCodex,
+    [switch]$SkipCopilot,
     [switch]$PrepareOnly,
-    [string]$TeamsAccount
+    [string]$TeamsAccount,
+    [ValidateRange(0, 65535)][int]$Port = 8766
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
@@ -68,19 +70,11 @@ try {
     }
 
     $startScript = Join-Path $PSScriptRoot 'start-office.ps1'
-    $startArgs = @{ Dev = [bool]$Dev }
+    $startArgs = @{ Dev = [bool]$Dev; SkipCodex = [bool]$SkipCodex; SkipCopilot = [bool]$SkipCopilot; Port = $Port }
     if (-not [string]::IsNullOrWhiteSpace($TeamsAccount)) { $startArgs.TeamsAccount = $TeamsAccount }
     & $startScript @startArgs
     Remove-Item Env:OFFICE_BRIDGE_TEAMS_ACCOUNT -ErrorAction SilentlyContinue
 
-    $verifyTask = if ($Dev) { 'verify-dev' } else { 'verify' }
-    & $actionServer devenv --datadir $taskData task $verifyTask
-    if ($LASTEXITCODE -ne 0) { throw 'Bootstrap verification failed.' }
-    if (-not $SkipCodex) {
-        $registerTask = if ($Dev) { 'register-dev' } else { 'register' }
-        & $actionServer devenv --datadir $taskData task $registerTask
-        if ($LASTEXITCODE -ne 0) { throw 'Codex MCP registration failed.' }
-    }
 } finally {
     if ($hadActionsHome) { $env:ACTIONS_HOME = $oldActionsHome } else { Remove-Item Env:ACTIONS_HOME -ErrorAction SilentlyContinue }
     if ($hadTeamsAccount) { $env:OFFICE_BRIDGE_TEAMS_ACCOUNT = $oldTeamsAccount } else { Remove-Item Env:OFFICE_BRIDGE_TEAMS_ACCOUNT -ErrorAction SilentlyContinue }

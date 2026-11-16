@@ -10,17 +10,17 @@ Run from a fresh clone on Windows, under your signed-in work account:
 ./bootstrap.ps1 -Dev
 ```
 
-Bootstrap installs the pinned Actions Runtime executable, prepares RCC with Windows certificate trust, installs the verified WebView2 SDK and any missing WebView2 Runtime, starts the background server, verifies Teams through MCP, and registers the endpoint in Codex. It never sends a test message. Classic Outlook must be installed and configured for Outlook actions.
+Bootstrap installs the pinned Actions Runtime executable, prepares RCC with Windows certificate trust, installs the verified WebView2 SDK and any missing WebView2 Runtime, starts the background server, verifies Teams through MCP, and registers the endpoint in Codex and Copilot. It never sends a test message. Classic Outlook must be installed and configured for Outlook actions.
 
 Bootstrap reuses the privately saved Teams account, or detects your signed-in Windows work account on a fresh device. Use `-TeamsAccount your.name@company.com` to override it or when Windows cannot provide a work-account address. Teams must still match that exact account. Setup also installs the checksum-verified Windows Actions Runtime executable in `~/.local/bin`.
 
-`-Dev` enables action auto-reload without an API key on loopback. Omit it for authenticated operation. Use `-PrepareOnly` to install prerequisites without starting, or `-SkipCodex` to skip registration. Start and stop an existing installation with `./powershell/start-office.ps1 -Dev` and `./powershell/stop-office.ps1`.
+`-Dev` enables action auto-reload. Both modes run on loopback without an API key. Use `-PrepareOnly` to install prerequisites without starting. `-SkipCodex` and `-SkipCopilot` independently skip client registration. Start and stop an existing installation with `./powershell/start-office.ps1 -Dev` and `./powershell/stop-office.ps1`.
 
-The server runs hidden in your Windows user session. It is not a Windows service or a logon task. Codex connects to that running server; registration does not launch it.
+The server runs hidden in your Windows user session. It is not a Windows service or a logon task. Clients connect to that running server; registration does not launch it. Startup prefers port 8766; when it is unavailable, Runtime asks Windows for a free port. Use `-Port 0` to always request a free port. Startup prints the actual URL and records it in `.state/server.json`; verification and both client registrations use that record.
 
-- MCP: `http://127.0.0.1:8766/mcp`
-- Runtime UI: `http://127.0.0.1:8766`
-- Full live API: `http://127.0.0.1:8766/openapi.json`
+- MCP: `<printed server URL>/mcp`
+- Runtime UI: the server URL printed at startup
+- Full live API: `<printed server URL>/openapi.json`
 - Saved API: [docs/api/openapi.json](docs/api/openapi.json)
 
 ## Layout
@@ -56,7 +56,7 @@ action-server devenv --datadir .state/tasks task verify-teams-dev
 
 These commands use `ACTIONS_HOME` from the current environment. Bootstrap defaults it to `%LOCALAPPDATA%/OfficeActionServer/rcc-actions`; preserve an explicit override so tasks use the intended RCC profile and TLS trust.
 
-The `verify-teams-dev` task verifies MCP discovery, the hidden Teams session, a self-chat read, and worker continuity. `scripts/verify_mcp.py` also checks authenticated Outlook and desktop Teams reads. Registration preserves unrelated Codex configuration.
+The `verify-teams-dev` task verifies MCP discovery, the hidden Teams session, a self-chat read, and worker continuity. `scripts/verify_mcp.py` also checks Outlook and desktop Teams reads. Each start removes and recreates only the `desktop-office` entry in Codex and Copilot, then reads both configurations back. Other entries are preserved; no configuration backups are created.
 
 Teams exposes general chat search, list, read, send, and edit actions. Use `teams_web_find_chats` to search the Teams directory, or `teams_web_list_chats` for currently loaded chats. Choose a `{chat_id, title}` reference; actions verify it against the actual chat header. The same actions handle self chats and group chats. Sending and editing accept plain text or supported Markdown for bold, italic, inline code, lists, and HTTP(S) links.
 
