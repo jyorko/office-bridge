@@ -27,6 +27,8 @@ if ($process) {
         if ($hadActionsHome) { $env:ACTIONS_HOME = $oldActionsHome } else { Remove-Item Env:ACTIONS_HOME -ErrorAction SilentlyContinue }
         Pop-Location
     }
+    . (Join-Path $taskRoot 'src\office_bridge\native\process-environment.ps1')
+    Repair-ProcessEnvironment
     $kill = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\taskkill.exe') -ArgumentList @('/PID', [string]$serverPid, '/T', '/F') -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $stateDir 'stop.stdout.log') -RedirectStandardError (Join-Path $stateDir 'stop.stderr.log')
     $remaining = Get-CimInstance Win32_Process -Filter "ProcessId = $serverPid" -ErrorAction SilentlyContinue
     if ($kill.ExitCode -ne 0 -and $remaining) { throw 'Could not stop the verified managed server process tree; inspect .state/stop.stderr.log.' }

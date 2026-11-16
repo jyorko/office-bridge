@@ -56,6 +56,8 @@ try {
             Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
             throw 'The WebView2 Evergreen installer does not have a valid Microsoft signature.'
         }
+        . (Join-Path $taskRoot 'src\office_bridge\native\process-environment.ps1')
+        Repair-ProcessEnvironment
         $install = Start-Process -FilePath $installer -ArgumentList '/silent','/install' -PassThru -Wait -WindowStyle Hidden
         Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
         if ($install.ExitCode -ne 0) { throw "WebView2 Runtime installation failed with exit code $($install.ExitCode)." }

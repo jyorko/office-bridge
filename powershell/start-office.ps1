@@ -83,6 +83,8 @@ try {
         if (-not $record) {
             $env:OFFICE_BRIDGE_PORT = if ($attempt -eq 0) { [string]$Port } else { '0' }
             $arguments = 'devenv --datadir "' + $taskData + '" task ' + $taskName
+            . (Join-Path $taskRoot 'src\office_bridge\native\process-environment.ps1')
+            Repair-ProcessEnvironment
             $started = Start-Process -FilePath $actionServer -ArgumentList $arguments -WorkingDirectory $taskRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $stateDir 'server.stdout.log') -RedirectStandardError $stderrPath -PassThru
             $record = @{ pid = $started.Id; task = $taskName; datadir = $taskData; executable = $actionServer; instance = [guid]::NewGuid().ToString('N'); mcp_url = $null; requested_port = $Port; startup_attempt = $attempt + 1 }
             Save-ServerRecord $record

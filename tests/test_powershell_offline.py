@@ -4,6 +4,64 @@ import subprocess
 from pathlib import Path
 
 
+def test_hidden_process_with_duplicate_environment_names(tmp_path):
+    source = (
+        Path(__file__).parents[1] / "src" / "office_bridge" / "native" / "process-environment.ps1"
+    )
+    harness = tmp_path / "environment.ps1"
+    output = tmp_path / "output.txt"
+    harness.write_text(
+        r"""
+param([string]$SourceFile,[string]$OutputFile)
+$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class EnvironmentFixture {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetEnvironmentStringsW(string block);
+}
+'@
+$before = [Environment]::GetEnvironmentVariable('Path', 'Process')
+$variables = [Environment]::GetEnvironmentVariables('Process')
+$entries = @($variables.Keys | Where-Object { $_ -ine 'Path' } | ForEach-Object { "$_=$($variables[$_])" })
+$entries += "Path=$before", "PATH=$before", 'OFFICE_BRIDGE_ENV_TEST=preserved'
+if (-not [EnvironmentFixture]::SetEnvironmentStringsW(($entries -join "`0") + "`0`0")) {
+    throw 'Could not create raw duplicate environment block'
+}
+$names = @([Environment]::GetEnvironmentVariables('Process').Keys | Where-Object { $_ -ieq 'Path' })
+if ($names.Count -ne 2) { throw 'Duplicate environment fixture was not inherited' }
+. $SourceFile
+Repair-ProcessEnvironment
+Repair-ProcessEnvironment
+$names = @([Environment]::GetEnvironmentVariables('Process').Keys | Where-Object { $_ -ieq 'Path' })
+if ($names.Count -ne 1) { throw 'Duplicate environment names remain' }
+if ([Environment]::GetEnvironmentVariable('Path', 'Process') -cne $before) { throw 'Effective Path changed' }
+$child = Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/d /c echo %OFFICE_BRIDGE_ENV_TEST%' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $OutputFile
+if ($child.ExitCode -ne 0) { throw 'Hidden child launch failed' }
+if ((Get-Content -LiteralPath $OutputFile -Raw).Trim() -cne 'preserved') { throw 'Unrelated environment changed' }
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(harness),
+            "-SourceFile",
+            str(source),
+            "-OutputFile",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_powershell_identity_version_digest_guards(tmp_path):
     source = Path(__file__).parents[1] / "src" / "office_bridge" / "native" / "office.ps1"
     harness = tmp_path / "synthetic.ps1"
