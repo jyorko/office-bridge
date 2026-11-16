@@ -8,6 +8,24 @@ import time
 from ctypes import wintypes
 
 MAX_FRAME = 1_048_576
+HOST_ERRORS = frozenset(
+    {
+        "draft_exists",
+        "identity_failed",
+        "failed",
+        "host_operation_failed",
+        "foreground_interference",
+        "primary_state_changed",
+        "script_changed_during_operation",
+        "workspace_unavailable",
+        "search_control_unavailable",
+        "lookup_timeout",
+        "lookup_ambiguous_use_email",
+        "lookup_results_unverified",
+        "lookup_selection_unverified",
+        "lookup_resolution_unverified",
+    }
+)
 
 
 class SessionError(RuntimeError):
@@ -18,8 +36,11 @@ def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
     if operation not in {
         "teams_web_status",
         "teams_web_list_chats",
+        "teams_web_find_chats",
         "teams_web_read_chat",
         "teams_web_send_chat",
+        "teams_web_inspect_message",
+        "teams_web_edit_message",
         "shutdown",
     }:
         raise SessionError("invalid_operation")
@@ -109,8 +130,7 @@ def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
         if (
             envelope.get("version") == 1
             and envelope.get("ok") is False
-            and envelope.get("error")
-            in {"draft_exists", "identity_failed", "failed", "host_operation_failed"}
+            and envelope.get("error") in HOST_ERRORS
         ):
             raise SessionError(envelope["error"])
         if (

@@ -149,15 +149,12 @@ def main() -> None:
         raise SystemExit("This bootstrap helper requires Windows.")
     STATE.mkdir(parents=True, exist_ok=True)
     secure(STATE, directory=True)
-    runtime_python = ROOT / ".runtime" / "Scripts" / "python.exe"
-    if not runtime_python.is_file():
-        raise RuntimeError("Pinned runtime is missing; run setup.ps1 first")
-
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         raise RuntimeError("LOCALAPPDATA is unavailable")
     actions_home = Path(
-        os.environ.get("ACTIONS_HOME")
+        os.environ.get("OFFICE_BRIDGE_TARGET_ACTIONS_HOME")
+        or os.environ.get("ACTIONS_HOME")
         or Path(local_app_data) / "OfficeActionServer" / "rcc-actions"
     )
     os.environ["ACTIONS_HOME"] = str(actions_home)
@@ -165,13 +162,21 @@ def main() -> None:
     # Read the Windows trust store before network activity; certificate verification stays on.
     roots = windows_roots()
 
-    # Use the same RCC download helper as actions-runtime; this keeps its version aligned.
-    sys.path.insert(0, str(ROOT / "src"))
-    from actions.server import _download_rcc, _settings
+    # The minimal bootstrap task passes its already-downloaded official RCC binary.
+    configured_rcc = os.environ.get("OFFICE_BRIDGE_BOOTSTRAP_RCC")
+    if configured_rcc:
+        rcc = Path(configured_rcc)
+        if not rcc.is_file():
+            raise RuntimeError(f"Configured official RCC executable does not exist: {rcc}")
+    else:
+        # Keep the full-runtime helper as a fallback for direct/manual invocations.
+        sys.path.insert(0, str(ROOT / "src"))
+        from actions.server import _download_rcc, _settings
 
-    actions_home = _settings.get_actions_home()
+        actions_home = _settings.get_actions_home()
+        rcc = _download_rcc.download_rcc()
+
     actions_home.mkdir(parents=True, exist_ok=True)
-    rcc = _download_rcc.download_rcc()
     action_profile = prepare_profile(rcc, actions_home, "actions", roots)
     print(f"Prepared managed RCC {rcc}; active profile retained as {action_profile!r}.")
     print(f"Managed RCC home: {actions_home}")

@@ -1,5 +1,6 @@
 import teams_actions as actions
 from office_bridge import desktop
+from office_bridge.teams import session
 from office_bridge.teams.models import WebChatRef
 
 CHAT_ID = "19:" + "a" * 32 + "@thread.v2"
@@ -65,3 +66,18 @@ def test_self_chat_is_discovered_as_a_generic_reference(monkeypatch):
     result = actions.teams_web_read_chat(listed.result.items[0], 10)
     assert result.result.chat == chat
     assert [call[0] for call in calls] == ["teams_web_list_chats", "teams_web_read_chat"]
+
+
+def test_edit_message_uses_native_teams_session(monkeypatch):
+    calls = []
+
+    def invoke_session(operation, arguments, timeout):
+        calls.append((operation, arguments, timeout))
+        return {"state": "edited"}
+
+    monkeypatch.setattr(desktop.os, "name", "nt")
+    monkeypatch.setattr(session, "invoke", invoke_session)
+    arguments = {"chat": {"chat_id": CHAT_ID, "title": "Example Group"}}
+    result = desktop.invoke("teams_web_edit_message", arguments)
+    assert result == {"state": "edited"}
+    assert calls == [("teams_web_edit_message", arguments, 90)]

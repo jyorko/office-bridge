@@ -1,0 +1,7 @@
+{
+  "version": "1.1.1",
+  "asset": "actions-runtime-1.1.1-windows64.exe",
+  "release_url": "https://github.com/joshyorko/actions/releases/download/actions-runtime-1.1.1",
+  "checksum_sha256": "3683f654217b4a9868c1581d13025af2a93093ccbcc87ca6b97c35a55dfef48b",
+  "asset_sha256": "0388d7f2e4080ba5c3a800bb556f8f01a65aa4834f3698eceb240888288fd8d2"
+}

@@ -39,13 +39,24 @@ public sealed class TeamsSession : ApplicationContext
     readonly CancellationTokenSource stop = new CancellationTokenSource();
     CoreWebView2Environment environment;
     CoreWebView2Controller controller;
+    CoreWebView2Controller auxiliaryController;
+    Form auxiliaryHost;
     FileStream profileLock;
     System.Windows.Forms.Timer foregroundTimer;
     bool initializing, interference;
     string error = "loading";
     string currentAccountName;
     string groupScript;
-    string scriptPath, nativePath, scriptDigest, nativeDigest;
+    string lookupScript;
+    string scriptPath, formattingPath, nativePath, lookupPath;
+    string scriptDigest, formattingDigest, nativeDigest, lookupDigest;
+
+    sealed class CrossChatContext
+    {
+        public CoreWebView2 Core;
+        public string PrimarySnapshot;
+        public bool ProtectPrimary;
+    }
 
     const string Surface = @"(() => {
       const dialog=document.querySelector('[data-tid=me-control-menu-dialog]');
@@ -124,10 +135,11 @@ public sealed class TeamsSession : ApplicationContext
             };
             scriptPath = Environment.GetEnvironmentVariable("OFFICE_TEAMS_SCRIPT_FILE");
             nativePath = Environment.GetEnvironmentVariable("OFFICE_TEAMS_HOST_SOURCE");
-            if (!String.IsNullOrEmpty(scriptPath) && File.Exists(scriptPath))
-                groupScript = File.ReadAllText(scriptPath);
-            scriptDigest = FileDigest(scriptPath);
+            string nativeDirectory = Path.GetDirectoryName(scriptPath) ?? "";
+            formattingPath = Path.Combine(nativeDirectory, "formatting.js");
+            lookupPath = Path.Combine(nativeDirectory, "lookup.js");
             nativeDigest = FileDigest(nativePath);
+            RefreshScripts();
             if (String.IsNullOrEmpty(expectedAccount) ||
                 !Regex.IsMatch(expectedAccount, "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"))
                 throw new InvalidOperationException("expected_account_unconfigured");
@@ -164,14 +176,412 @@ public sealed class TeamsSession : ApplicationContext
     }
     async Task<Dictionary<string, object>> Inspect()
     {
+        return await Inspect(controller.CoreWebView2);
+    }
+    async Task<Dictionary<string, object>> Inspect(CoreWebView2 core)
+    {
         string surface = Surface.Replace("__EXPECTED_ACCOUNT__", Json.Serialize(expectedAccount));
-        string raw = await controller.CoreWebView2.ExecuteScriptAsync(surface);
+        string raw = await core.ExecuteScriptAsync(surface);
         return Json.Deserialize<Dictionary<string, object>>(raw);
+    }
+    bool HostVisible()
+    {
+        return host.Visible || (auxiliaryHost != null && auxiliaryHost.Visible);
+    }
+    async Task<CoreWebView2> EnsureAuxiliary()
+    {
+        if (auxiliaryController == null)
+        {
+            if (environment == null || error == "browser_failed")
+                throw new InvalidOperationException("host_unavailable");
+            auxiliaryHost = new Form { ShowInTaskbar = false, ClientSize = new Size(1200, 900) };
+            var handle = auxiliaryHost.Handle;
+            auxiliaryController = await environment.CreateCoreWebView2ControllerAsync(handle);
+            auxiliaryController.Bounds = new Rectangle(0, 0, 1200, 900);
+            auxiliaryController.IsVisible = true;
+            var core = auxiliaryController.CoreWebView2;
+            core.Settings.IsWebMessageEnabled = false;
+            core.Settings.AreHostObjectsAllowed = false;
+            core.Settings.AreDefaultScriptDialogsEnabled = false;
+            core.NewWindowRequested += (s, e) => { e.Handled = true; };
+            core.LaunchingExternalUriScheme += (s, e) => { e.Cancel = true; };
+            core.PermissionRequested += (s, e) =>
+            {
+                e.State = CoreWebView2PermissionState.Deny;
+                e.Handled = true;
+            };
+            core.BasicAuthenticationRequested += (s, e) => { e.Cancel = true; };
+            core.ProcessFailed += (s, e) => { error = "browser_failed"; };
+            core.Navigate("https://teams.cloud.microsoft/");
+        }
+        if (HostVisible() || OwnedForeground())
+        {
+            interference = true;
+            throw new InvalidOperationException("foreground_interference");
+        }
+        return auxiliaryController.CoreWebView2;
+    }
+    async Task<bool> AuxiliaryAuthenticated(CoreWebView2 core)
+    {
+        var page = await Inspect(core);
+        if (Flag(page, "blocked") || Flag(page, "login"))
+            return false;
+        if (!Flag(page, "app"))
+            return false;
+        await core.ExecuteScriptAsync(
+            "(() => { if(!document.querySelector('[data-tid=me-control-menu-dialog]')) " +
+            "document.querySelector('[data-tid=me-control-avatar-trigger]')?.click(); })()");
+        page = await Inspect(core);
+        bool authenticated = Flag(page, "account_verified") &&
+                            !String.IsNullOrWhiteSpace(Convert.ToString(page["account_name"]));
+        if (authenticated)
+            currentAccountName = Convert.ToString(page["account_name"]);
+        await core.ExecuteScriptAsync(
+            "(() => { if(document.querySelector('[data-tid=me-control-menu-dialog]')) " +
+            "document.querySelector('[data-tid=me-control-avatar-trigger]')?.click(); })()");
+        return authenticated;
+    }
+    async Task<bool> AuxiliaryHasExactChat(CoreWebView2 core, string chatId, string title)
+    {
+        string script = @"(() => {
+          const titleNode=document.querySelector('[data-tid=chat-title]');
+          const headerId=titleNode?.closest('[id^=chat-header-]')?.id||'';
+          return {host:location.hostname, app:!!document.querySelector('[data-tid=experience-layout]'),
+            title:titleNode?.textContent.trim()||'', headerId};
+        })()";
+        string raw = await core.ExecuteScriptAsync(script);
+        var page = Json.Deserialize<Dictionary<string, object>>(raw);
+        return page != null &&
+               (Convert.ToString(page["host"]) == "teams.cloud.microsoft" ||
+                Convert.ToString(page["host"]) == "teams.microsoft.com") &&
+               Flag(page, "app") && Convert.ToString(page["title"]) == title &&
+               Convert.ToString(page["headerId"]) == "chat-header-" + chatId;
+    }
+    async Task OpenExactChatOnAuxiliary(CoreWebView2 core, string chatId, string title)
+    {
+        if (auxiliaryController == null)
+            return;
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120)
+            throw new InvalidDataException();
+        if (await AuxiliaryHasExactChat(core, chatId, title))
+            return;
+        if (!chatId.StartsWith("19:", StringComparison.Ordinal))
+            return;
+
+        var snapshot = await ExecuteChat(core, new Dictionary<string, object> {
+            { "phase", "snapshot" }
+        });
+        if (Flag(snapshot, "dirty"))
+            throw new InvalidOperationException("draft_exists");
+
+        string deepLink = "https://teams.microsoft.com/l/chat/" +
+                          Uri.EscapeDataString(chatId) + "/conversations";
+        core.Navigate(deepLink);
+        var deadline = DateTime.UtcNow.AddSeconds(25);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (HostVisible() || OwnedForeground())
+            {
+                interference = true;
+                throw new InvalidOperationException("foreground_interference");
+            }
+            var page = await Inspect(core);
+            if (Flag(page, "blocked") || Flag(page, "login"))
+                throw new InvalidOperationException("identity_failed");
+            if (Flag(page, "app"))
+            {
+                if (!await AuxiliaryAuthenticated(core))
+                    throw new InvalidOperationException("identity_failed");
+                if (await AuxiliaryHasExactChat(core, chatId, title))
+                    return;
+            }
+            await Task.Delay(200);
+        }
+        throw new InvalidOperationException("destination_failed");
+    }
+    async Task<string> PrimarySnapshot()
+    {
+        const string snapshot = @"(() => {
+          const mix = value => {
+            let a=2166136261, b=2246822519;
+            for (let i=0;i<value.length;i++) {
+              const c=value.charCodeAt(i); a=Math.imul(a^c,16777619); b=Math.imul(b+c,3266489917);
+            }
+            return [a>>>0,b>>>0,value.length].join(':');
+          };
+          const editors=Array.from(document.querySelectorAll('[data-tid=ckeditor][contenteditable=true]'));
+          const hasDraft=e => (e.innerText||'').replace(/\n/g,'').trim().length>0 ||
+            !!e.querySelector('img,video,table,iframe,object,a') ||
+            e.querySelectorAll('p').length>1 || e.querySelectorAll('br').length>1;
+          const title=document.querySelector('[data-tid=chat-title]');
+          return JSON.stringify({href:location.href, title:title?.textContent.trim()||'',
+            headerId:title?.closest('[id^=chat-header-]')?.id||'',
+            dirty:editors.some(hasDraft),
+            editors:editors.map(e=>({id:e.id,text:mix(e.innerText||''),html:mix(e.innerHTML),
+              active:document.activeElement===e}))});
+        })()";
+        string raw = await controller.CoreWebView2.ExecuteScriptAsync(snapshot);
+        return Json.Deserialize<string>(raw);
+    }
+    async Task<Dictionary<string, object>> FindChats(Dictionary<string, object> args)
+    {
+        object rawQuery, rawLimit;
+        if (!args.TryGetValue("query", out rawQuery) || !args.TryGetValue("limit", out rawLimit))
+            throw new InvalidDataException();
+        string query = rawQuery as string;
+        int limit = Convert.ToInt32(rawLimit);
+        if (String.IsNullOrWhiteSpace(query) || query.Length > 120 || limit < 1 || limit > 50)
+            throw new InvalidDataException();
+
+        var context = await BeginCrossChat(true);
+        string authorName = currentAccountName;
+        var prepared = await ExecuteLookup(context.Core,
+            new Dictionary<string, object> { { "phase", "prepare_search" } });
+        object inputValue;
+        var input = prepared.TryGetValue("input", out inputValue)
+                        ? inputValue as Dictionary<string, object>
+                        : null;
+        if (Convert.ToString(prepared["state"]) != "search_prepared" || input == null ||
+            Convert.ToString(input["id"]) != "ms-searchux-input" ||
+            Convert.ToString(input["tid"]) != "AUTOSUGGEST_INPUT" ||
+            Convert.ToString(input["role"]) != "combobox")
+            throw new InvalidOperationException("search_control_unavailable");
+        if (!ScriptsUnchanged() || !await PrimaryUnchanged(context))
+            throw new InvalidOperationException("primary_state_changed");
+        await context.Core.CallDevToolsProtocolMethodAsync(
+            "Input.insertText", Json.Serialize(new Dictionary<string, object> { { "text", query } }));
+        if (!ScriptsUnchanged())
+            throw new InvalidOperationException("script_changed_during_operation");
+
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        Dictionary<string, object> search = null;
+        string state = "waiting";
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!await PrimaryUnchanged(context))
+                throw new InvalidOperationException("primary_state_changed");
+            search = await ExecuteLookup(context.Core, new Dictionary<string, object> {
+                { "phase", "search_results" }, { "query", query }, { "limit", limit }
+            });
+            state = Convert.ToString(search["state"]);
+            if (state != "waiting")
+                break;
+            await Task.Delay(200);
+        }
+        if (state == "waiting")
+            throw new TimeoutException("lookup_timeout");
+        if (state == "ambiguous")
+            throw new InvalidOperationException("lookup_ambiguous_use_email");
+        if (state == "empty")
+        {
+            object truncatedValue;
+            bool emptyTruncated = search.TryGetValue("truncated", out truncatedValue) &&
+                                  truncatedValue is bool && (bool)truncatedValue;
+            if (emptyTruncated)
+                throw new InvalidOperationException("lookup_ambiguous_use_email");
+            await VerifyCrossChat(context, authorName);
+            return new Dictionary<string, object> {
+                { "state", "found" }, { "scope", "teams_search" },
+                { "items", new object[0] }, { "truncated", false }
+            };
+        }
+        if (state != "search_results")
+            throw new InvalidOperationException("lookup_results_unverified");
+
+        object rawCandidates, rawTruncated;
+        var candidates = search.TryGetValue("candidates", out rawCandidates)
+                            ? rawCandidates as System.Collections.IList
+                            : null;
+        if (candidates == null || !search.TryGetValue("truncated", out rawTruncated) ||
+            !(rawTruncated is bool) || candidates.Count > 100)
+            throw new InvalidOperationException("lookup_results_unverified");
+        bool truncated = (bool)rawTruncated;
+        var exactPeople = new List<Dictionary<string, object>>();
+        var exactGroups = new List<Dictionary<string, object>>();
+        var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in candidates)
+        {
+            var candidate = item as Dictionary<string, object>;
+            if (candidate == null || !candidate.ContainsKey("key") || !candidate.ContainsKey("type") ||
+                !candidate.ContainsKey("title") || !candidate.ContainsKey("exact_match") ||
+                !candidate.ContainsKey("match_kind"))
+                throw new InvalidOperationException("lookup_results_unverified");
+            string key = Convert.ToString(candidate["key"]),
+                   type = Convert.ToString(candidate["type"]),
+                   title = Convert.ToString(candidate["title"]),
+                   matchKind = Convert.ToString(candidate["match_kind"]);
+            if (String.IsNullOrWhiteSpace(key) || key.Length > 256 ||
+                String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
+                (type != "person" && type != "group") || !seenKeys.Add(key) ||
+                !(candidate["exact_match"] is bool) ||
+                (matchKind != "title" && matchKind != "email" && matchKind != ""))
+                throw new InvalidOperationException("lookup_results_unverified");
+            if ((bool)candidate["exact_match"])
+            {
+                if (type == "person") exactPeople.Add(candidate);
+                else exactGroups.Add(candidate);
+            }
+        }
+        if (truncated)
+            throw new InvalidOperationException("lookup_ambiguous_use_email");
+        Dictionary<string, object> selected = null;
+        if (exactPeople.Count == 1)
+            selected = exactPeople[0];
+        else if (exactPeople.Count > 1)
+            throw new InvalidOperationException("lookup_ambiguous_use_email");
+        else if (exactGroups.Count == 1)
+            selected = exactGroups[0];
+        else if (exactGroups.Count > 1)
+            throw new InvalidOperationException("lookup_ambiguous_use_email");
+        if (selected == null)
+        {
+            await VerifyCrossChat(context, authorName);
+            return new Dictionary<string, object> {
+                { "state", "found" }, { "scope", "teams_search" },
+                { "items", new object[0] }, { "truncated", false }
+            };
+        }
+
+        string selectedKey = Convert.ToString(selected["key"]);
+        string selectedType = Convert.ToString(selected["type"]);
+        string selectedTitle = Convert.ToString(selected["title"]);
+        var selectRequest = new Dictionary<string, object> {
+            { "phase", "select_result" }, { "query", query }, { "key", selectedKey },
+            { "type", selectedType }, { "title", selectedTitle }
+        };
+        var selectedResult = await ExecuteLookup(context.Core, selectRequest);
+        if (Convert.ToString(selectedResult["state"]) != "result_selected")
+            throw new InvalidOperationException("lookup_selection_unverified");
+
+        var resolveRequest = new Dictionary<string, object> {
+            { "phase", "resolved_chat" }, { "query", query }, { "key", selectedKey },
+            { "type", selectedType }, { "title", selectedTitle }
+        };
+        deadline = DateTime.UtcNow.AddSeconds(20);
+        Dictionary<string, object> resolved = null;
+        state = "waiting";
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!await PrimaryUnchanged(context))
+                throw new InvalidOperationException("primary_state_changed");
+            resolved = await ExecuteLookup(context.Core, resolveRequest);
+            state = Convert.ToString(resolved["state"]);
+            if (state != "waiting")
+                break;
+            await Task.Delay(200);
+        }
+        if (state != "chat_resolved")
+            throw new InvalidOperationException(state == "waiting" ? "lookup_timeout" :
+                                                 "lookup_resolution_unverified");
+        object rawChat;
+        var chat = resolved.TryGetValue("chat", out rawChat)
+                       ? rawChat as Dictionary<string, object>
+                       : null;
+        if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
+            throw new InvalidOperationException("lookup_resolution_unverified");
+        string chatId = Convert.ToString(chat["chat_id"]),
+               chatTitle = Convert.ToString(chat["title"]);
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(chatTitle) || chatTitle.Length > 120 ||
+            chatTitle != selectedTitle)
+            throw new InvalidOperationException("lookup_resolution_unverified");
+        await VerifyCrossChat(context, authorName);
+        return new Dictionary<string, object> {
+            { "state", "found" }, { "scope", "teams_search" },
+            { "items", new object[] { new Dictionary<string, object> {
+                { "chat_id", chatId }, { "title", chatTitle }
+            } } }, { "truncated", false }
+        };
+    }
+    async Task<Dictionary<string, object>> FindChatsDiagnostics(Dictionary<string, object> args)
+    {
+        object requested;
+        if (!args.TryGetValue("diagnostics", out requested) || !(requested is bool) ||
+            !(bool)requested || String.IsNullOrEmpty(lookupScript))
+            throw new InvalidDataException();
+        object rawQuery;
+        string query = args.TryGetValue("query", out rawQuery) ? rawQuery as string : null;
+        if (rawQuery != null && (query == null || String.IsNullOrWhiteSpace(query) || query.Length > 120))
+            throw new InvalidDataException();
+        object rawSnapshot;
+        bool snapshotPrimary = args.TryGetValue("snapshot_primary", out rawSnapshot) &&
+                               rawSnapshot is bool && (bool)rawSnapshot;
+        if (rawSnapshot != null && !(rawSnapshot is bool))
+            throw new InvalidDataException();
+        object rawOpenCopilot;
+        bool openCopilot = args.TryGetValue("open_copilot", out rawOpenCopilot) &&
+                           rawOpenCopilot is bool && (bool)rawOpenCopilot;
+        if (rawOpenCopilot != null && !(rawOpenCopilot is bool))
+            throw new InvalidDataException();
+        object rawInspectCopilot;
+        bool inspectCopilot = args.TryGetValue("inspect_copilot", out rawInspectCopilot) &&
+                              rawInspectCopilot is bool && (bool)rawInspectCopilot;
+        if (rawInspectCopilot != null && !(rawInspectCopilot is bool))
+            throw new InvalidDataException();
+        if ((openCopilot || inspectCopilot) && (openCopilot == inspectCopilot || query != null))
+            throw new InvalidDataException();
+        var context = await BeginCrossChat(true, !(openCopilot || inspectCopilot));
+        string authorName = currentAccountName;
+        var primaryMetadata = snapshotPrimary ? SnapshotMetadata(context.PrimarySnapshot) : null;
+        if (query == null && snapshotPrimary)
+        {
+            await VerifyCrossChat(context, authorName);
+            return new Dictionary<string, object> {
+                { "state", "diagnostics" }, { "primary_snapshot", primaryMetadata }
+            };
+        }
+        if (query != null)
+        {
+            var prepared = await ExecuteLookup(context.Core,
+                new Dictionary<string, object> { { "phase", "prepare_search" } });
+            object inputValue;
+            var input = prepared.TryGetValue("input", out inputValue)
+                            ? inputValue as Dictionary<string, object>
+                            : null;
+            if (Convert.ToString(prepared["state"]) != "search_prepared" || input == null ||
+                Convert.ToString(input["id"]) != "ms-searchux-input" ||
+                Convert.ToString(input["tid"]) != "AUTOSUGGEST_INPUT" ||
+                Convert.ToString(input["role"]) != "combobox")
+                throw new InvalidOperationException("search_control_unavailable");
+            if (!ScriptsUnchanged())
+                throw new InvalidOperationException("script_changed_during_operation");
+            await context.Core.CallDevToolsProtocolMethodAsync(
+                "Input.insertText", Json.Serialize(new Dictionary<string, object> { { "text", query } }));
+            if (!ScriptsUnchanged())
+                throw new InvalidOperationException("script_changed_during_operation");
+            await Task.Delay(1500);
+        }
+        var result = await ExecuteLookup(context.Core,
+            new Dictionary<string, object> { { "phase", openCopilot ? "open_copilot" : "diagnostics" } });
+        object resultState;
+        var allowedOpenStates = new HashSet<string> { "copilot_open_clicked", "copilot_already_open",
+            "copilot_control_ambiguous", "copilot_control_disabled", "draft_exists" };
+        if (result == null || !result.TryGetValue("state", out resultState) ||
+            (openCopilot ? !allowedOpenStates.Contains(Convert.ToString(resultState)) :
+             Convert.ToString(resultState) != "diagnostics"))
+            throw new InvalidOperationException("host_operation_failed");
+        await VerifyCrossChat(context, authorName);
+        if (snapshotPrimary)
+            result["primary_snapshot"] = primaryMetadata;
+        return result;
     }
     static bool Flag(Dictionary<string, object> value, string name)
     {
         object x;
         return value.TryGetValue(name, out x) && x is bool && (bool)x;
+    }
+    static bool InsidePoint(Dictionary<string, object> value, double x, double y)
+    {
+        object raw;
+        var rect = value.TryGetValue("trigger_rect", out raw)
+                       ? raw as Dictionary<string, object>
+                       : null;
+        if (rect == null || !rect.ContainsKey("x") || !rect.ContainsKey("y") ||
+            !rect.ContainsKey("width") || !rect.ContainsKey("height"))
+            return false;
+        double left = Convert.ToDouble(rect["x"]), top = Convert.ToDouble(rect["y"]),
+               width = Convert.ToDouble(rect["width"]), height = Convert.ToDouble(rect["height"]);
+        return width > 0 && height > 0 && x >= left && x <= left + width &&
+               y >= top && y <= top + height;
     }
     static string FileDigest(string path)
     {
@@ -179,6 +589,167 @@ public sealed class TeamsSession : ApplicationContext
             return null;
         using (var sha = SHA256.Create()) using (
             var file = File.OpenRead(path)) return BitConverter.ToString(sha.ComputeHash(file));
+    }
+    static string ReadScriptSnapshot(string path, out string digest)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        using (var sha = SHA256.Create())
+            digest = BitConverter.ToString(sha.ComputeHash(bytes));
+        return Encoding.UTF8.GetString(bytes);
+    }
+    void RefreshScripts()
+    {
+        string chatDigest, formatDigest, lookupCurrentDigest;
+        string chat = ReadScriptSnapshot(scriptPath, out chatDigest);
+        string formatting = ReadScriptSnapshot(formattingPath, out formatDigest);
+        string lookup = ReadScriptSnapshot(lookupPath, out lookupCurrentDigest);
+        if (String.IsNullOrWhiteSpace(chat) || String.IsNullOrWhiteSpace(formatting) ||
+            String.IsNullOrWhiteSpace(lookup) || chatDigest != FileDigest(scriptPath) ||
+            formatDigest != FileDigest(formattingPath) || lookupCurrentDigest != FileDigest(lookupPath))
+            throw new IOException("The Teams JavaScript bundle changed while it was loading.");
+        groupScript = "(request) => (" + chat + ")(request, " + formatting + ")";
+        lookupScript = lookup;
+        scriptDigest = chatDigest;
+        formattingDigest = formatDigest;
+        lookupDigest = lookupCurrentDigest;
+    }
+    bool ScriptsUnchanged()
+    {
+        return scriptDigest != null && formattingDigest != null && lookupDigest != null &&
+               scriptDigest == FileDigest(scriptPath) &&
+               formattingDigest == FileDigest(formattingPath) &&
+               lookupDigest == FileDigest(lookupPath);
+    }
+    async Task<Dictionary<string, object>> ExecuteChat(
+        CoreWebView2 core, Dictionary<string, object> request)
+    {
+        if (!ScriptsUnchanged())
+            throw new InvalidOperationException("script_changed_during_operation");
+        string script = "(() => {try { return (" + groupScript + ")( " + Json.Serialize(request) +
+            "); } catch(error) { return {state:'script_error',error_name:error.name,error_message:String(error.message).slice(0,200)}; }})()";
+        var result = Json.Deserialize<Dictionary<string, object>>(
+            await core.ExecuteScriptAsync(script));
+        if (!ScriptsUnchanged())
+            throw new InvalidOperationException("script_changed_during_operation");
+        if (result == null)
+            throw new InvalidOperationException("The browser script returned no result.");
+        return result;
+    }
+    async Task<Dictionary<string, object>> ExecuteLookup(
+        CoreWebView2 core, Dictionary<string, object> request)
+    {
+        if (!ScriptsUnchanged())
+            throw new InvalidOperationException("script_changed_during_operation");
+        var result = Json.Deserialize<Dictionary<string, object>>(
+            await core.ExecuteScriptAsync("(" + lookupScript + ")( " + Json.Serialize(request) + ")"));
+        if (!ScriptsUnchanged())
+            throw new InvalidOperationException("script_changed_during_operation");
+        if (result == null)
+            throw new InvalidOperationException("The lookup script returned no result.");
+        return result;
+    }
+    async Task EnsureChatWorkspace(CoreWebView2 core)
+    {
+        string navigationId = Guid.NewGuid().ToString("N");
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline)
+        {
+            var result = await ExecuteChat(core, new Dictionary<string, object> {
+                { "phase", "workspace_ready" }, { "navigationId", navigationId }
+            });
+            string state = Convert.ToString(result["state"]);
+            if (state == "workspace_ready")
+                return;
+            if (state != "waiting" && state != "workspace_opening")
+                throw new InvalidOperationException("workspace_unavailable");
+            await Task.Delay(200);
+        }
+        throw new TimeoutException();
+    }
+    static bool SnapshotIsDirty(string snapshot)
+    {
+        var value = Json.Deserialize<Dictionary<string, object>>(snapshot);
+        return Flag(value, "dirty");
+    }
+    Dictionary<string, object> SnapshotMetadata(string snapshot)
+    {
+        var value = Json.Deserialize<Dictionary<string, object>>(snapshot);
+        object rawEditors;
+        var editors = value.TryGetValue("editors", out rawEditors)
+                          ? rawEditors as System.Collections.IList
+                          : null;
+        string fingerprint;
+        using (var sha = SHA256.Create())
+            fingerprint = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(snapshot)))
+                             .Replace("-", "")
+                             .ToLowerInvariant();
+        return new Dictionary<string, object> {
+            { "fingerprint", fingerprint }, { "editor_count", editors == null ? 0 : editors.Count },
+            { "dirty", Flag(value, "dirty") }
+        };
+    }
+    async Task<CrossChatContext> BeginCrossChat(bool forceAuxiliary = false,
+                                                bool ensureAuxiliaryWorkspace = true)
+    {
+        var status = await Status();
+        if (Convert.ToString(status["state"]) != "authenticated" || interference ||
+            Flag(status, "restart_required") || String.IsNullOrWhiteSpace(currentAccountName))
+            throw new InvalidOperationException("identity_failed");
+        string author = currentAccountName;
+        await EnsureChatWorkspace(controller.CoreWebView2);
+        string snapshot = await PrimarySnapshot();
+        bool protect = SnapshotIsDirty(snapshot);
+        CoreWebView2 core = controller.CoreWebView2;
+        if (protect || forceAuxiliary)
+        {
+            core = await EnsureAuxiliary();
+            var deadline = DateTime.UtcNow.AddSeconds(25);
+            bool authenticated = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (HostVisible() || OwnedForeground())
+                {
+                    interference = true;
+                    throw new InvalidOperationException("foreground_interference");
+                }
+                authenticated = await AuxiliaryAuthenticated(core);
+                if (authenticated)
+                    break;
+                await Task.Delay(200);
+            }
+            if (!authenticated || currentAccountName != author)
+                throw new InvalidOperationException("identity_failed");
+            if (ensureAuxiliaryWorkspace)
+                await EnsureChatWorkspace(core);
+        }
+        protect = protect || forceAuxiliary;
+        var context = new CrossChatContext {
+            Core = core,
+            PrimarySnapshot = snapshot,
+            ProtectPrimary = protect
+        };
+        if (protect && !await PrimaryUnchanged(context))
+            throw new InvalidOperationException("primary_state_changed");
+        return context;
+    }
+    async Task<bool> PrimaryUnchanged(CrossChatContext context)
+    {
+        if (HostVisible() || OwnedForeground())
+        {
+            interference = true;
+            throw new InvalidOperationException("foreground_interference");
+        }
+        if (!context.ProtectPrimary)
+            return true;
+        return String.Equals(context.PrimarySnapshot, await PrimarySnapshot(),
+                             StringComparison.Ordinal);
+    }
+    async Task VerifyCrossChat(CrossChatContext context, string author)
+    {
+        if (!await AuxiliaryAuthenticated(context.Core) || currentAccountName != author)
+            throw new InvalidOperationException("identity_failed");
+        if (!await PrimaryUnchanged(context))
+            throw new InvalidOperationException("primary_state_changed");
     }
     async Task<Dictionary<string, object>> Status()
     {
@@ -228,9 +799,12 @@ public sealed class TeamsSession : ApplicationContext
         bool restartRequired = true;
         try
         {
-            restartRequired = scriptDigest == null || nativeDigest == null ||
+            restartRequired = scriptDigest == null || formattingDigest == null ||
+                              nativeDigest == null || lookupDigest == null ||
                               scriptDigest != FileDigest(scriptPath) ||
-                              nativeDigest != FileDigest(nativePath);
+                              formattingDigest != FileDigest(formattingPath) ||
+                              nativeDigest != FileDigest(nativePath) ||
+                              lookupDigest != FileDigest(lookupPath);
         }
         catch (IOException)
         {
@@ -265,6 +839,9 @@ public sealed class TeamsSession : ApplicationContext
     }
     async Task<Dictionary<string, object>> Dispatch(Dictionary<string, object> request)
     {
+        if (!String.IsNullOrEmpty(scriptPath) && !String.IsNullOrEmpty(formattingPath) &&
+            !String.IsNullOrEmpty(lookupPath))
+            RefreshScripts();
         object version, operation;
         if (!request.TryGetValue("version", out version) || Convert.ToInt32(version) != 1 ||
             !request.TryGetValue("operation", out operation))
@@ -272,6 +849,23 @@ public sealed class TeamsSession : ApplicationContext
         string op = Convert.ToString(operation);
         if (op == "teams_web_status")
             return await Status();
+        if (op == "teams_web_find_chats")
+        {
+            object raw;
+            if (!request.TryGetValue("arguments", out raw))
+                throw new InvalidDataException();
+            var args = raw as Dictionary<string, object>;
+            if (args == null)
+                throw new InvalidDataException();
+            object diagnostic;
+            if (args.TryGetValue("diagnostics", out diagnostic))
+            {
+                if (!(diagnostic is bool) || !(bool)diagnostic)
+                    throw new InvalidDataException();
+                return await FindChatsDiagnostics(args);
+            }
+            return await FindChats(args);
+        }
         if (op == "shutdown")
         {
             object raw;
@@ -286,7 +880,8 @@ public sealed class TeamsSession : ApplicationContext
             return new Dictionary<string, object> { { "shutdown", true } };
         }
         if (op == "teams_web_list_chats" || op == "teams_web_read_chat" ||
-            op == "teams_web_send_chat")
+            op == "teams_web_send_chat" || op == "teams_web_inspect_message" ||
+            op == "teams_web_edit_message")
         {
             object raw;
             if (!request.TryGetValue("arguments", out raw))
@@ -298,6 +893,10 @@ public sealed class TeamsSession : ApplicationContext
                 return await ListChats(args);
             if (op == "teams_web_read_chat")
                 return await Read(args);
+            if (op == "teams_web_inspect_message")
+                return await InspectMessage(args);
+            if (op == "teams_web_edit_message")
+                return await EditMessage(args);
             return await Send(args);
         }
         throw new InvalidDataException();
@@ -312,25 +911,19 @@ public sealed class TeamsSession : ApplicationContext
         if (limit < 1 || limit > 100 || (rawName != null && name == null) ||
             (name != null && (name.Length < 1 || name.Length > 120)))
             throw new InvalidDataException();
-        var current = await Status();
-        if (Convert.ToString(current["state"]) != "authenticated" || interference)
-            throw new InvalidOperationException();
+        var context = await BeginCrossChat();
+        string authorName = currentAccountName;
         string navigationId = Guid.NewGuid().ToString("N");
         var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
-            if (host.Visible || OwnedForeground())
-            {
-                interference = true;
-                throw new InvalidOperationException();
-            }
+            if (!await PrimaryUnchanged(context))
+                throw new InvalidOperationException("primary_state_changed");
             var request = new Dictionary<string, object> {
                 { "phase", "list" }, { "name", name }, { "limit", limit },
                 { "navigationId", navigationId }
             };
-            var result = Json.Deserialize<Dictionary<string, object>>(
-                await controller.CoreWebView2.ExecuteScriptAsync("(" + groupScript + ")(" +
-                    Json.Serialize(request) + ")"));
+            var result = await ExecuteChat(context.Core, request);
             string state = Convert.ToString(result["state"]);
             if (state == "listed")
             {
@@ -348,9 +941,7 @@ public sealed class TeamsSession : ApplicationContext
                         (name != null && Convert.ToString(refValue["title"]) != name))
                         throw new InvalidOperationException();
                 }
-                current = await Status();
-                if (Convert.ToString(current["state"]) != "authenticated")
-                    throw new InvalidOperationException();
+                await VerifyCrossChat(context, authorName);
                 return result;
             }
             if (state != "waiting")
@@ -362,9 +953,10 @@ public sealed class TeamsSession : ApplicationContext
     static bool ValidChatId(string chatId)
     {
         return chatId == "48:notes" || Regex.IsMatch(
-            chatId ?? "", "^19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype)$");
+            chatId ?? "", "^19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces)$");
     }
-    async Task<Dictionary<string, object>> Read(Dictionary<string, object> args)
+    async Task<Dictionary<string, object>> Read(Dictionary<string, object> args,
+                                                CrossChatContext context = null)
     {
         object chatValue, limitValue;
         if (!args.TryGetValue("chat", out chatValue) ||
@@ -378,34 +970,31 @@ public sealed class TeamsSession : ApplicationContext
         if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
             limit < 1 || limit > 50)
             throw new InvalidDataException();
-        var current = await Status();
-        if (Convert.ToString(current["state"]) != "authenticated" || interference)
-            throw new InvalidOperationException();
+        bool ownContext = context == null;
+        if (ownContext)
+            context = await BeginCrossChat();
+        string authorName = currentAccountName;
+        if (context.ProtectPrimary)
+            await OpenExactChatOnAuxiliary(context.Core, chatId, title);
         string phase = "locate", navigationId = Guid.NewGuid().ToString("N");
         var deadline = DateTime.UtcNow.AddSeconds(25);
         while (DateTime.UtcNow < deadline)
         {
-            if (host.Visible || OwnedForeground())
-            {
-                interference = true;
-                throw new InvalidOperationException();
-            }
+            if (!await PrimaryUnchanged(context))
+                throw new InvalidOperationException("primary_state_changed");
             var request = new Dictionary<string, object> {
                 { "phase", phase }, { "chatId", chatId }, { "title", title },
                 { "limit", limit }, { "navigationId", navigationId }
             };
-            var result = Json.Deserialize<Dictionary<string, object>>(
-                await controller.CoreWebView2.ExecuteScriptAsync("(" + groupScript + ")(" +
-                    Json.Serialize(request) + ")"));
+            var result = await ExecuteChat(context.Core, request);
             string state = Convert.ToString(result["state"]);
             if (state == "read")
             {
                 if (Convert.ToString(result["chat_id"]) != chatId ||
                     Convert.ToString(result["title"]) != title)
                     throw new InvalidOperationException();
-                current = await Status();
-                if (Convert.ToString(current["state"]) != "authenticated")
-                    throw new InvalidOperationException();
+                if (ownContext)
+                    await VerifyCrossChat(context, authorName);
                 return result;
             }
             if (state == "ready" || state == "navigated") phase = "read";
@@ -415,12 +1004,64 @@ public sealed class TeamsSession : ApplicationContext
         }
         throw new TimeoutException();
     }
+    async Task<Dictionary<string, object>> InspectMessage(Dictionary<string, object> args)
+    {
+        if (Flag(args, "validate_format"))
+        {
+            args["phase"] = "validate_payload";
+            return await RunChat(args);
+        }
+        object chatValue, messageValue, openMenuValue;
+        if (!args.TryGetValue("chat", out chatValue) ||
+            !args.TryGetValue("message_id", out messageValue) || String.IsNullOrEmpty(groupScript))
+            throw new InvalidDataException();
+        var chat = chatValue as Dictionary<string, object>;
+        if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
+            throw new InvalidDataException();
+        string chatId = Convert.ToString(chat["chat_id"]), title = Convert.ToString(chat["title"]),
+               messageId = Convert.ToString(messageValue);
+        bool openMenu = args.TryGetValue("open_menu", out openMenuValue) &&
+                        openMenuValue is bool && (bool)openMenuValue;
+        if (openMenuValue != null && !(openMenuValue is bool))
+            throw new InvalidDataException();
+        if (openMenu)
+            throw new InvalidOperationException("menu_interaction_unavailable");
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
+            !Regex.IsMatch(messageId, "^message-body-[0-9]{13}$"))
+            throw new InvalidDataException();
+        var context = await BeginCrossChat();
+        string authorName = currentAccountName;
+        await Read(new Dictionary<string, object> {
+            { "chat", chat }, { "limit", 50 }
+        }, context);
+        var request = new Dictionary<string, object> {
+            { "phase", "inspect_message" }, { "chatId", chatId }, { "title", title },
+            { "messageId", messageId }, { "authorName", authorName }, { "menuAction", "" }
+        };
+        var result = await RunChat(context.Core, request);
+        await VerifyCrossChat(context, authorName);
+        return result;
+    }
     async Task<Dictionary<string, object>> Send(Dictionary<string, object> args)
     {
-        object chatValue, bodyValue, requestValue;
+        object chatValue, bodyValue, requestValue, rawFormat, rawHtml, rawFormatting, rawNodes;
         if (!args.TryGetValue("chat", out chatValue) || !args.TryGetValue("body", out bodyValue) ||
             !args.TryGetValue("request_id", out requestValue) || String.IsNullOrEmpty(groupScript))
             throw new InvalidDataException();
+        string bodyFormat = args.TryGetValue("body_format", out rawFormat)
+                                ? rawFormat as string
+                                : "plain";
+        string html = args.TryGetValue("html", out rawHtml) ? rawHtml as string : null;
+        object nodes = args.TryGetValue("nodes", out rawNodes) ? rawNodes : null;
+        var formatting = args.TryGetValue("formatting", out rawFormatting)
+                             ? rawFormatting as Dictionary<string, object>
+                             : null;
+        if (formatting == null && rawFormatting == null)
+            formatting = new Dictionary<string, object> {
+                { "bold", new object[0] }, { "italic", new object[0] },
+                { "code", new object[0] }, { "links", new object[0] },
+                { "unordered_list", false }, { "ordered_list", false }
+            };
         var chat = chatValue as Dictionary<string, object>;
         if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
             throw new InvalidDataException();
@@ -428,12 +1069,21 @@ public sealed class TeamsSession : ApplicationContext
                body = bodyValue as string, requestId = requestValue as string;
         if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
             String.IsNullOrEmpty(body) || body.Length > 2000 || String.IsNullOrEmpty(requestId) ||
-            !Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$"))
+            !Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$") ||
+            (bodyFormat != "plain" && bodyFormat != "markdown") || formatting == null ||
+            (html != null && html.Length > 12000))
             throw new InvalidDataException();
-        var current = await Status();
-        if (Convert.ToString(current["state"]) != "authenticated" || interference ||
-            Flag(current, "restart_required") || String.IsNullOrWhiteSpace(currentAccountName))
-            throw new InvalidOperationException();
+        var context = await BeginCrossChat();
+        string authorName = currentAccountName;
+        if (context.ProtectPrimary)
+            await OpenExactChatOnAuxiliary(context.Core, chatId, title);
+        var validationRequest = new Dictionary<string, object> {
+            { "phase", "validate_payload" }, { "body", body }, { "bodyFormat", bodyFormat },
+            { "html", html }, { "nodes", nodes }, { "formatting", formatting }
+        };
+        var payloadCheck = await RunChat(context.Core, validationRequest);
+        if (Convert.ToString(payloadCheck["state"]) != "payload_valid")
+            throw new InvalidDataException();
         string claims = Path.Combine(Path.GetDirectoryName(profile), "teams-web-sends", "claims");
         Directory.CreateDirectory(claims);
         string digest, bodyDigest, targetDigest;
@@ -442,7 +1092,9 @@ public sealed class TeamsSession : ApplicationContext
             digest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(requestId)))
                          .Replace("-", "")
                          .ToLowerInvariant();
-            bodyDigest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(body)))
+            bodyDigest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(
+                             bodyFormat + "\0" + body + "\0" + (html ?? "") + "\0" +
+                             Json.Serialize(formatting))))
                              .Replace("-", "")
                              .ToLowerInvariant();
             targetDigest = BitConverter.ToString(
@@ -459,50 +1111,41 @@ public sealed class TeamsSession : ApplicationContext
             file.Write(bytes, 0, bytes.Length);
             file.Flush(true);
         }
-        string phase = "navigate", navigationId = Guid.NewGuid().ToString("N");
-        string authorName = currentAccountName;
+        string phase = context.ProtectPrimary ? "locate" : "navigate";
+        string navigationId = Guid.NewGuid().ToString("N");
         var deadline = DateTime.UtcNow.AddSeconds(35);
         while (DateTime.UtcNow < deadline)
         {
-            if (host.Visible || OwnedForeground())
-            {
-                interference = true;
-                throw new InvalidOperationException();
-            }
-            if (phase == "prepare" || phase == "send" || phase == "observe")
-            {
-                current = await Status();
-                if (Convert.ToString(current["state"]) != "authenticated" ||
-                    Flag(current, "restart_required") ||
-                    currentAccountName != authorName)
-                    throw new InvalidOperationException();
-            }
+            if (!await PrimaryUnchanged(context))
+                throw new InvalidOperationException("primary_state_changed");
             var request = new Dictionary<string, object> {
-                { "phase", phase }, { "body", body }, { "chatId", chatId },
+                { "phase", phase }, { "body", body }, { "bodyFormat", bodyFormat },
+                { "html", html }, { "nodes", nodes }, { "formatting", formatting }, { "chatId", chatId },
                 { "title", title }, { "requestId", requestId }, { "authorName", authorName },
                 { "navigationId", navigationId }
             };
-            var result = Json.Deserialize<Dictionary<string, object>>(
-                await controller.CoreWebView2.ExecuteScriptAsync("(" + groupScript + ")( " +
-                    Json.Serialize(request) + ")"));
+            var result = await RunChat(context.Core, request);
             string state = Convert.ToString(result["state"]);
-            if (state == "navigated") phase = "prepare";
-            else if (state == "prepared")
+            if (state == "navigated" || state == "ready") phase = "prepare";
+            else if (state == "prepared" && bodyFormat == "plain")
             {
-                await controller.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                if (!ScriptsUnchanged() || !await PrimaryUnchanged(context))
+                    throw new InvalidOperationException("primary_state_changed");
+                await context.Core.CallDevToolsProtocolMethodAsync(
                     "Input.insertText", Json.Serialize(new Dictionary<string, object> { { "text", body } }));
                 phase = "send";
             }
+            else if (state == "prepared" && bodyFormat == "markdown")
+                phase = "paste";
+            else if (state == "pasted")
+                phase = "send";
             else if (state == "clicked") phase = "observe";
             else if (state == "observed")
             {
                 if (Convert.ToString(result["chat_id"]) != chatId ||
                     Convert.ToString(result["title"]) != title)
                     throw new InvalidOperationException();
-                current = await Status();
-                if (Convert.ToString(current["state"]) != "authenticated" ||
-                    currentAccountName != authorName)
-                    throw new InvalidOperationException();
+                await VerifyCrossChat(context, authorName);
                 string receipt = claim + ".receipt";
                 using (var file = new FileStream(receipt, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
@@ -516,6 +1159,192 @@ public sealed class TeamsSession : ApplicationContext
             await Task.Delay(150);
         }
         throw new TimeoutException();
+    }
+    async Task<Dictionary<string, object>> RunChat(Dictionary<string, object> request)
+    {
+        return await RunChat(controller.CoreWebView2, request);
+    }
+    async Task<Dictionary<string, object>> RunChat(
+        CoreWebView2 core, Dictionary<string, object> request)
+    {
+        return await ExecuteChat(core, request);
+    }
+    async Task<Dictionary<string, object>> EditMessage(Dictionary<string, object> args)
+    {
+        object chatValue, messageValue, expectedValue, bodyValue, requestValue;
+        object rawFormat, rawHtml, rawFormatting, rawNodes;
+        if (!args.TryGetValue("chat", out chatValue) ||
+            !args.TryGetValue("message_id", out messageValue) ||
+            !args.TryGetValue("expected_text", out expectedValue) ||
+            !args.TryGetValue("body", out bodyValue) ||
+            !args.TryGetValue("request_id", out requestValue) ||
+            String.IsNullOrEmpty(groupScript))
+            throw new InvalidDataException();
+        var chat = chatValue as Dictionary<string, object>;
+        if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
+            throw new InvalidDataException();
+        string chatId = Convert.ToString(chat["chat_id"]), title = Convert.ToString(chat["title"]),
+               messageId = messageValue as string, expectedText = expectedValue as string,
+               body = bodyValue as string, requestId = requestValue as string;
+        string bodyFormat = args.TryGetValue("body_format", out rawFormat)
+                                ? rawFormat as string
+                                : "plain";
+        string html = args.TryGetValue("html", out rawHtml) ? rawHtml as string : null;
+        object nodes = args.TryGetValue("nodes", out rawNodes) ? rawNodes : null;
+        var formatting = args.TryGetValue("formatting", out rawFormatting)
+                             ? rawFormatting as Dictionary<string, object>
+                             : null;
+        if (formatting == null && rawFormatting == null)
+            formatting = new Dictionary<string, object> {
+                { "bold", new object[0] }, { "italic", new object[0] },
+                { "code", new object[0] }, { "links", new object[0] },
+                { "unordered_list", false }, { "ordered_list", false }
+            };
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
+            !Regex.IsMatch(messageId ?? "", "^message-body-[0-9]{13}$") ||
+            expectedText == null || expectedText.Length > 2000 || String.IsNullOrEmpty(body) ||
+            body.Length > 2000 || String.IsNullOrEmpty(requestId) ||
+            !Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$") ||
+            (bodyFormat != "plain" && bodyFormat != "markdown") || formatting == null ||
+            (html != null && html.Length > 12000))
+            throw new InvalidDataException();
+
+        var validationRequest = new Dictionary<string, object> {
+            { "phase", "validate_payload" }, { "body", body }, { "bodyFormat", bodyFormat },
+            { "html", html }, { "nodes", nodes }, { "formatting", formatting }
+        };
+        var context = await BeginCrossChat();
+        string authorName = currentAccountName;
+        if (context.ProtectPrimary)
+            await OpenExactChatOnAuxiliary(context.Core, chatId, title);
+        var payloadCheck = await RunChat(context.Core, validationRequest);
+        if (Convert.ToString(payloadCheck["state"]) != "payload_valid")
+            throw new InvalidDataException();
+
+        await Read(new Dictionary<string, object> {
+            { "chat", chat }, { "limit", 50 }
+        }, context);
+
+        string claims = Path.Combine(Path.GetDirectoryName(profile), "teams-web-sends", "claims",
+                                     "edits");
+        Directory.CreateDirectory(claims);
+        string requestDigest, payloadDigest, destinationDigest, messageDigest;
+        using (var sha = SHA256.Create())
+        {
+            requestDigest = BitConverter.ToString(sha.ComputeHash(
+                                 Encoding.UTF8.GetBytes(requestId)))
+                                .Replace("-", "")
+                                .ToLowerInvariant();
+            payloadDigest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(
+                                Json.Serialize(args))))
+                               .Replace("-", "")
+                               .ToLowerInvariant();
+            destinationDigest = BitConverter.ToString(sha.ComputeHash(
+                                    Encoding.UTF8.GetBytes(chatId + "\0" + title)))
+                                   .Replace("-", "")
+                                   .ToLowerInvariant();
+            messageDigest = BitConverter.ToString(sha.ComputeHash(
+                                 Encoding.UTF8.GetBytes(messageId)))
+                                .Replace("-", "")
+                                .ToLowerInvariant();
+        }
+        string claim = Path.Combine(claims, requestDigest + ".json");
+        using (var file = new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(
+                new Dictionary<string, object> { { "request_sha256", payloadDigest },
+                                                 { "destination_sha256", destinationDigest },
+                                                 { "message_sha256", messageDigest } }));
+            file.Write(bytes, 0, bytes.Length);
+            file.Flush(true);
+        }
+
+        string phase = "edit_begin", navigationId = Guid.NewGuid().ToString("N");
+        var deadline = DateTime.UtcNow.AddSeconds(35);
+        bool focusEmulation = false, completed = false;
+        Dictionary<string, object> result = null;
+        Exception operationError = null;
+        try
+        {
+            await context.Core.CallDevToolsProtocolMethodAsync(
+                "Emulation.setFocusEmulationEnabled", Json.Serialize(
+                    new Dictionary<string, object> { { "enabled", true } }));
+            focusEmulation = true;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!await PrimaryUnchanged(context) || !ScriptsUnchanged())
+                    throw new InvalidOperationException("primary_state_changed");
+                var request = new Dictionary<string, object> {
+                    { "phase", phase }, { "chatId", chatId }, { "title", title },
+                    { "messageId", messageId }, { "expectedText", expectedText },
+                    { "body", body }, { "bodyFormat", bodyFormat }, { "html", html },
+                    { "nodes", nodes }, { "formatting", formatting }, { "requestId", requestId },
+                    { "authorName", authorName }, { "navigationId", navigationId }
+                };
+                result = await RunChat(context.Core, request);
+                string state = Convert.ToString(result["state"]);
+                if (state == "waiting")
+                {
+                    await Task.Delay(150);
+                    continue;
+                }
+                if (phase == "edit_begin" && state == "toolbar_opening")
+                    phase = "edit_open";
+                else if (phase == "edit_open" && state == "editor_opening")
+                    phase = "edit_prepare";
+                else if (phase == "edit_prepare" && state == "editor_prepared")
+                    phase = "edit_paste";
+                else if (phase == "edit_paste" && state == "edit_pasted")
+                    phase = "edit_save";
+                else if (phase == "edit_save" && state == "edit_clicked")
+                {
+                    phase = "edit_observe";
+                }
+                else if (phase == "edit_observe" && state == "edited")
+                {
+                    if (Convert.ToString(result["chat_id"]) != chatId ||
+                        Convert.ToString(result["title"]) != title ||
+                        Convert.ToString(result["message_id"]) != messageId ||
+                        String.IsNullOrWhiteSpace(Convert.ToString(result["time"])))
+                        throw new InvalidOperationException();
+                    await VerifyCrossChat(context, authorName);
+                    string receipt = claim + ".receipt";
+                    using (var file = new FileStream(receipt, FileMode.CreateNew, FileAccess.Write,
+                                                     FileShare.None))
+                    {
+                        byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(result));
+                        file.Write(bytes, 0, bytes.Length);
+                        file.Flush(true);
+                    }
+                    completed = true;
+                    break;
+                }
+                else
+                    throw new InvalidOperationException(state);
+                await Task.Delay(150);
+            }
+            if (!completed)
+                throw new TimeoutException();
+        }
+        catch (Exception error)
+        {
+            operationError = error;
+        }
+        if (focusEmulation)
+        {
+            try
+            {
+                await context.Core.CallDevToolsProtocolMethodAsync(
+                    "Emulation.setFocusEmulationEnabled", Json.Serialize(
+                        new Dictionary<string, object> { { "enabled", false } }));
+            }
+            catch
+            {
+            }
+        }
+        if (operationError != null)
+            throw operationError;
+        return result;
     }
     async Task<Dictionary<string, object>> OnSta(Dictionary<string, object> request)
     {
@@ -592,11 +1421,19 @@ public sealed class TeamsSession : ApplicationContext
                     }
                     catch (Exception error)
                     {
-                        string reason = error.Message;
-                        if (reason != "draft_exists" && reason != "identity_failed" &&
-                            reason != "failed")
+                        string diagnosticReason = Regex.IsMatch(error.Message ?? "",
+                            "^[a-z][a-z0-9_]{1,80}$") ? error.Message : "host_operation_failed";
+                        string reason = diagnosticReason;
+                        var safeReasons = new HashSet<string>(StringComparer.Ordinal) {
+                            "draft_exists", "identity_failed", "failed", "foreground_interference",
+                            "primary_state_changed", "script_changed_during_operation",
+                            "workspace_unavailable", "search_control_unavailable", "lookup_timeout",
+                            "lookup_ambiguous_use_email", "lookup_results_unverified",
+                            "lookup_selection_unverified", "lookup_resolution_unverified"
+                        };
+                        if (!safeReasons.Contains(reason))
                             reason = "host_operation_failed";
-                        Console.Error.WriteLine("Teams session operation failed: " + reason + " (" +
+                        Console.Error.WriteLine("Teams session operation failed: " + diagnosticReason + " (" +
                                                 error.GetType().Name + ")");
                         response = new Dictionary<string, object> { { "version", 1 },
                                                                     { "ok", false },
@@ -648,6 +1485,8 @@ public sealed class TeamsSession : ApplicationContext
             foregroundTimer.Dispose();
         if (controller != null)
             controller.Close();
+        if (auxiliaryController != null)
+            auxiliaryController.Close();
         if (profileLock != null)
         {
             try
@@ -659,6 +1498,8 @@ public sealed class TeamsSession : ApplicationContext
             }
             profileLock.Dispose();
         }
+        if (auxiliaryHost != null)
+            auxiliaryHost.Dispose();
         host.Dispose();
         base.ExitThreadCore();
     }

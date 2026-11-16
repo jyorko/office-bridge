@@ -9,7 +9,9 @@
 ## Implementations
 
 - `office_bridge/desktop.py` invokes fixed, bounded PowerShell JSON-file adapters. The Outlook bridge preserves EntryID/StoreID identity and version checks. Teams desktop navigation refuses to take foreground focus.
-- `office_bridge/teams/service.py` owns background reads and send reservations. The existing group SQLite ledger and self-send ledger retain their locations and unknown-outcome behavior.
+- `office_bridge/teams/service.py` owns background reads and durable send/edit reservations. The existing group SQLite ledger and self-send ledger retain their locations and unknown-outcome behavior. Edit records use a separate table in the group ledger.
+- `office_bridge/teams/formatting.py` converts bounded Markdown to visible text, sanitized HTML, and expected formatting for browser verification.
+- `office_bridge/teams/lookup.py` validates directory search results before exposing exact chat references.
 - `office_bridge/teams/session.py` is the bounded named-pipe client for the launcher-owned Teams host.
 - `office_bridge/teams/backend.py` validates WebView2 status and retains optional Chromium/Edge diagnostics.
 - `office_bridge/runtime/supervisor.py` owns the hidden host lifecycle. `runtime/sdk.py` verifies the pinned SDK archive and DLL hashes.
@@ -17,19 +19,19 @@
 
 ## Persistent Teams session
 
-The launcher starts one hidden WebView2 host before disposable Action Server workers. Its STA message loop keeps the controller alive between calls. The host owns the persistent-profile lock and serializes local named-pipe requests. It is not a separate HTTP or MCP server.
+The launcher starts one hidden WebView2 host before disposable Action Server workers. Its STA message loop keeps the controller alive between calls. The host owns the persistent-profile lock and serializes local named-pipe requests. A second hidden WebView2 controller in the same host handles protected rich-content composition without changing the Windows clipboard. It is not a separate HTTP or MCP server.
 
 The host uses the existing Windows account SSO and dedicated profile. Teams refreshes that profile's own authentication; normal browser cookies are not copied. Authentication challenges are reported rather than bypassed.
 
-Workers can be replaced without replacing the browser. Native and selector scripts are loaded once per host generation. Changes set `restart_required`; restart the server to apply them. The supervisor limits crash restarts, and stop-office requests graceful host shutdown before terminating the verified server tree.
+Workers can be replaced without replacing the browser. Each operation refreshes the host's JavaScript sources from disk, so JavaScript changes take effect without replacing the host. Changes to the native C# host require `scripts/restart_teams_session.py`; status reports `restart_required` until that host reload. The supervisor limits restarts, and stop-office requests graceful host shutdown before terminating the verified server tree.
 
 All browser work is confined to the isolated session. Its containing window is never shown or activated. Popups and external app launches are blocked; the host checks for owned foreground interference. Browser-scoped input does not use the desktop keyboard or clipboard.
 
 ## Packaging and development
 
-`package.yaml` declares RCC worker dependencies and `pythonpath: src`. `robocorp-browser` resolves its compatible Playwright dependency. `scripts/requirements-dev.txt` declares the separate launcher/development environment installed by `powershell/setup.ps1`.
+`package.yaml` declares worker dependencies, Python development dependencies, and development tasks. The official `action-server devenv` command provisions those tools in its datadir from `package.yaml`; there is no `requirements-dev.txt` or required `.runtime` environment. `robocorp-browser` resolves its compatible Playwright dependency.
 
-`bootstrap.ps1` orchestrates setup, RCC trust, SDK and Runtime installation, startup, read-only verification, and Codex registration. `office_bridge/runtime/local_state.py` keeps the private device key and expected account independent of disposable checkout state. Application RCC environments use the device's `OfficeActionServer/rcc-actions` directory unless `ACTIONS_HOME` is explicitly set.
+`bootstrap.ps1` orchestrates setup, RCC trust, SDK and Runtime installation, startup, read-only verification, and Codex registration. `office_bridge/runtime/local_state.py` keeps the private device key and expected account independent of disposable checkout state. Application RCC environments use `%LOCALAPPDATA%/OfficeActionServer/rcc-actions` unless `ACTIONS_HOME` is explicitly set. Task commands must retain that environment choice so they use the intended certificate trust profile.
 
 `scripts/package_layout.py` derives staged files from `src/` and `package.yaml`. It excludes generated caches and never enumerates `.runtime` or private state as package input. It removes retired staged sources and copies only changed files. Development watching covers `src/` recursively, including added and removed files.
 

@@ -26,8 +26,11 @@ OPERATIONS = frozenset(
         "download_attachments",
         "teams_web_status",
         "teams_web_list_chats",
+        "teams_web_find_chats",
         "teams_web_read_chat",
         "teams_web_send_chat",
+        "teams_web_inspect_message",
+        "teams_web_edit_message",
     }
 )
 MUTATIONS = frozenset(
@@ -38,6 +41,7 @@ MUTATIONS = frozenset(
         "archive",
         "download_attachments",
         "teams_web_send_chat",
+        "teams_web_edit_message",
     }
 )
 MAX_BYTES = 1_048_576
@@ -58,8 +62,11 @@ def invoke(operation: str, arguments: dict) -> dict:
     if operation in {
         "teams_web_status",
         "teams_web_list_chats",
+        "teams_web_find_chats",
         "teams_web_read_chat",
         "teams_web_send_chat",
+        "teams_web_inspect_message",
+        "teams_web_edit_message",
     }:
         from office_bridge.teams.session import SessionError
         from office_bridge.teams.session import invoke as invoke_session

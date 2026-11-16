@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Actions Runtime",
-    "version": "1.1.0"
+    "version": "1.1.1"
   },
   "servers": [
     {
@@ -5335,7 +5335,7 @@
                                 "properties": {
                                   "chat_id": {
                                     "type": "string",
-                                    "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                                    "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
                                     "title": "Chat Id"
                                   },
                                   "title": {
@@ -5358,8 +5358,11 @@
                             },
                             "scope": {
                               "type": "string",
-                              "const": "currently_loaded_chat_list",
-                              "title": "Scope"
+                              "title": "Scope",
+                              "enum": [
+                                "currently_loaded_chat_list",
+                                "teams_search"
+                              ]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -5417,7 +5420,7 @@
     "/api/actions/desktop-office/teams-web-read-chat/run": {
       "post": {
         "summary": "Teams Web Read Chat",
-        "description": "Read loaded history from the verified exact chat reference.",
+        "description": "Read a bounded chat history, loading older messages up to the requested limit.",
         "operationId": "teams_web_read_chat",
         "requestBody": {
           "content": {
@@ -5428,7 +5431,7 @@
                     "properties": {
                       "chat_id": {
                         "type": "string",
-                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
                         "title": "Chat Id"
                       },
                       "title": {
@@ -5445,12 +5448,12 @@
                       "title"
                     ],
                     "title": "Chat",
-                    "description": "Exact chat reference returned by teams_web_list_chats."
+                    "description": "Exact chat reference returned by teams_web_find_chats or teams_web_list_chats."
                   },
                   "limit": {
                     "type": "integer",
                     "title": "Limit",
-                    "description": "Maximum loaded messages to return, up to 50.",
+                    "description": "Maximum messages to collect, up to 50; fewer may return at the time bound.",
                     "default": 20
                   }
                 },
@@ -5478,7 +5481,7 @@
                               "properties": {
                                 "chat_id": {
                                   "type": "string",
-                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
                                   "title": "Chat Id"
                                 },
                                 "title": {
@@ -5596,7 +5599,7 @@
                     "properties": {
                       "chat_id": {
                         "type": "string",
-                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
                         "title": "Chat Id"
                       },
                       "title": {
@@ -5613,17 +5616,27 @@
                       "title"
                     ],
                     "title": "Chat",
-                    "description": "Exact chat reference returned by teams_web_list_chats."
+                    "description": "Exact chat reference returned by teams_web_find_chats or teams_web_list_chats."
                   },
                   "body": {
                     "type": "string",
                     "title": "Body",
-                    "description": "Complete plain-text message, sent only to the referenced chat."
+                    "description": "Complete message text, sent only to the referenced chat."
                   },
                   "request_id": {
                     "type": "string",
                     "title": "Request Id",
                     "description": "Unique request ID; uncertain outcomes cannot be retried."
+                  },
+                  "body_format": {
+                    "type": "string",
+                    "enum": [
+                      "plain",
+                      "markdown"
+                    ],
+                    "title": "Body Format",
+                    "description": "Plain text or supported CommonMark formatting.",
+                    "default": "plain"
                   }
                 },
                 "type": "object",
@@ -5660,7 +5673,7 @@
                               "properties": {
                                 "chat_id": {
                                   "type": "string",
-                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\\.(?:v2|skype))$",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
                                   "title": "Chat Id"
                                 },
                                 "title": {
@@ -5803,6 +5816,613 @@
             }
           }
         }
+      }
+    },
+    "/api/actions/desktop-office/teams-web-edit-message/run": {
+      "post": {
+        "summary": "Teams Web Edit Message",
+        "description": "Edit an existing own message after exact chat, owner and text verification.",
+        "operationId": "teams_web_edit_message",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by teams_web_find_chats or teams_web_list_chats."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Exact existing message ID in the currently loaded chat."
+                  },
+                  "expected_text": {
+                    "type": "string",
+                    "title": "Expected Text",
+                    "description": "Exact old message text used for optimistic concurrency checks."
+                  },
+                  "body": {
+                    "type": "string",
+                    "title": "Body",
+                    "description": "Replacement message text."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "title": "Request Id",
+                    "description": "Unique edit ID; uncertain outcomes cannot be retried."
+                  },
+                  "body_format": {
+                    "type": "string",
+                    "enum": [
+                      "plain",
+                      "markdown"
+                    ],
+                    "title": "Body Format",
+                    "description": "Plain text or supported CommonMark formatting.",
+                    "default": "plain"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "message_id",
+                  "expected_text",
+                  "body",
+                  "request_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "edited",
+                                "already_edited"
+                              ],
+                              "title": "Status"
+                            },
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "title": "Message Id"
+                            },
+                            "time": {
+                              "type": "string",
+                              "title": "Time"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "status",
+                            "chat",
+                            "message_id",
+                            "time"
+                          ],
+                          "title": "EditReceipt"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Edit Message"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-find-chats/run": {
+      "post": {
+        "summary": "Teams Web Find Chats",
+        "description": "Search the Teams directory and return verified exact chat references.",
+        "operationId": "teams_web_find_chats",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "title": "Query",
+                    "description": "Bounded text to search in the Teams directory."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "title": "Limit",
+                    "description": "Maximum references to return, up to 50.",
+                    "default": 10
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "items": {
+                              "items": {
+                                "properties": {
+                                  "chat_id": {
+                                    "type": "string",
+                                    "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                    "title": "Chat Id"
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "title": "Title"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "type": "object",
+                                "required": [
+                                  "chat_id",
+                                  "title"
+                                ],
+                                "title": "WebChatRef"
+                              },
+                              "type": "array",
+                              "title": "Items"
+                            },
+                            "scope": {
+                              "type": "string",
+                              "enum": [
+                                "currently_loaded_chat_list",
+                                "teams_search"
+                              ],
+                              "title": "Scope"
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "title": "Truncated"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "items",
+                            "scope",
+                            "truncated"
+                          ],
+                          "title": "WebChatSearchResult"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Find Chats"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/evidence-pack-create/run": {
+      "post": {
+        "summary": "Evidence Pack Create",
+        "description": "Create a private evidence ZIP with a summary, source records and checksum manifest.",
+        "operationId": "evidence_pack_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "pack": {
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "title": "Title"
+                      },
+                      "summary": {
+                        "type": "string",
+                        "maxLength": 100000,
+                        "minLength": 1,
+                        "title": "Summary"
+                      },
+                      "sources": {
+                        "items": {
+                          "properties": {
+                            "reference": {
+                              "type": "string",
+                              "maxLength": 500,
+                              "minLength": 1,
+                              "title": "Reference"
+                            },
+                            "captured_at": {
+                              "type": "string",
+                              "maxLength": 100,
+                              "minLength": 1,
+                              "title": "Captured At"
+                            },
+                            "content": {
+                              "type": "string",
+                              "maxLength": 50000,
+                              "minLength": 1,
+                              "title": "Content"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": [
+                            "reference",
+                            "captured_at",
+                            "content"
+                          ],
+                          "title": "EvidenceSource"
+                        },
+                        "type": "array",
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "title": "Sources"
+                      },
+                      "coverage": {
+                        "type": "string",
+                        "maxLength": 4000,
+                        "minLength": 1,
+                        "title": "Coverage"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "title",
+                      "summary",
+                      "sources",
+                      "coverage"
+                    ],
+                    "title": "Pack",
+                    "description": "Title, caller-authored Markdown summary, explicit sources and coverage limitations."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "pack"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "pack_id": {
+                              "type": "string",
+                              "title": "Pack Id"
+                            },
+                            "path": {
+                              "type": "string",
+                              "title": "Path"
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "title": "Sha256"
+                            },
+                            "size_bytes": {
+                              "type": "integer",
+                              "title": "Size Bytes"
+                            },
+                            "source_count": {
+                              "type": "integer",
+                              "title": "Source Count"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "pack_id",
+                            "path",
+                            "sha256",
+                            "size_bytes",
+                            "source_count"
+                          ],
+                          "title": "EvidencePackReceipt"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Evidence Pack Create"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/evidence-pack-send-devsy/run": {
+      "post": {
+        "summary": "Evidence Pack Send Devsy",
+        "description": "Deliver a specific evidence pack to a named Devsy workspace after user authorization.",
+        "operationId": "evidence_pack_send_devsy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "pack_id": {
+                    "type": "string",
+                    "title": "Pack Id",
+                    "description": "SHA-256 ID returned by evidence_pack_create."
+                  },
+                  "workspace": {
+                    "type": "string",
+                    "title": "Workspace",
+                    "description": "Exact workspace ID from the current Devsy inventory."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "title": "Request Id",
+                    "description": "Unique delivery ID; uncertain outcomes block automatic replay."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "pack_id",
+                  "workspace",
+                  "request_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "pack_id": {
+                              "type": "string",
+                              "title": "Pack Id"
+                            },
+                            "workspace": {
+                              "type": "string",
+                              "title": "Workspace"
+                            },
+                            "remote_directory": {
+                              "type": "string",
+                              "title": "Remote Directory"
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "title": "Sha256"
+                            },
+                            "size_bytes": {
+                              "type": "integer",
+                              "title": "Size Bytes"
+                            },
+                            "files": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array",
+                              "title": "Files"
+                            },
+                            "verified": {
+                              "type": "boolean",
+                              "title": "Verified"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "pack_id",
+                            "workspace",
+                            "remote_directory",
+                            "sha256",
+                            "size_bytes",
+                            "files",
+                            "verified"
+                          ],
+                          "title": "EvidenceDeliveryReceipt"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Evidence Pack Send Devsy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
       }
     }
   },

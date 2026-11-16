@@ -20,7 +20,7 @@
 
 ## Private data and desktop protection
 
-- `.runtime`, `.package`, `.state`, Python caches, profiles, credentials, mail/chat data, downloads, logs, databases, and binaries must stay out of Git.
+- `.runtime` (legacy disposable only), `.package`, `.state`, Python caches, profiles, credentials, mail/chat data, downloads, logs, databases, and binaries must stay out of Git.
 - Device data lives under `%LOCALAPPDATA%/OfficeActionServer`: `config` holds the key and expected account, `teams-webview2-profile` holds the isolated session, `webview2-sdk` holds verified DLLs, and `teams-web-sends` holds durable send records.
 - Bootstrap must work without previous generated folders or browser data. Use Windows work-account SSO and verify the exact account; never extract tokens or copy the user's normal Chrome/Edge profile.
 - Keep certificate verification enabled. Configure Windows roots in the actual application RCC home before building workers. Preserve other profile settings and explicit `ACTIONS_HOME` overrides.
@@ -32,9 +32,9 @@
 
 ## Verification and publication
 
-- Run `./.runtime/Scripts/python.exe -m pytest`, `./.runtime/Scripts/ruff.exe check src scripts tests`, and the formatter check for changed Python.
-- Use `scripts/bootstrap_check.py --dev` for read-only MCP discovery, exact Teams identity, hidden-host checks, and self-chat read. `scripts/verify_teams_web.py --dev --count 2` checks continuity across managed workers.
+- Run `action-server devenv --datadir .state/tasks task test`, `action-server devenv --datadir .state/tasks task lint`, and `action-server devenv --datadir .state/tasks task format-check`.
+- Use `action-server devenv --datadir .state/tasks task verify-teams-dev` for read-only MCP discovery, exact Teams identity, hidden-host checks, self-chat read, and continuity across managed workers.
 - Never replay a historical send test or use a send as a bootstrap check. Inspect existing send history before any separately authorized send test.
-- Rebuild the SDK with its pinned package and DLL hash checks. Do not commit downloaded artifacts. Update `docs/api/openapi.json` with `scripts/export_openapi.py` when the API changes.
+- Rebuild the SDK with its pinned package and DLL hash checks. Do not commit downloaded artifacts. Update `docs/api/openapi.json` with `action-server devenv --datadir .state/tasks task export-openapi` when the API changes.
 - Inspect the staged diff and scan for private data before committing or pushing. Keep documentation aligned with actual lifecycle paths and installed versions.
 - Report reproducible Action Server bugs upstream to `https://github.com/joshyorko/actions/issues` with sanitized steps, versions, expected/actual behavior, and relevant logs. The user authorizes these reports. Resolve package configuration and local integration mistakes here; never publish credentials, corporate messages, receipts, or private identifiers in a report.

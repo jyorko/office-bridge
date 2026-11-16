@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import os
 import subprocess
 
 from _bootstrap import ROOT
@@ -14,6 +15,7 @@ def main():
     parser.add_argument("--dev", action="store_true")
     parser.add_argument("--teams-account")
     args = parser.parse_args()
+    teams_account = args.teams_account or os.environ.get("OFFICE_BRIDGE_TEAMS_ACCOUNT")
     config = config_directory()
     config.mkdir(parents=True, exist_ok=True)
     identity = subprocess.check_output(["whoami.exe", "/user", "/fo", "csv", "/nh"], text=True)
@@ -31,7 +33,7 @@ def main():
     )
     if result.returncode:
         raise SystemExit("Could not restrict device configuration access")
-    prepare(ROOT, dev=args.dev, teams_account=args.teams_account)
+    prepare(ROOT, dev=args.dev, teams_account=teams_account)
     print("Private device configuration prepared; existing credentials preserved.")
 
 

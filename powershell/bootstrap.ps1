@@ -6,23 +6,25 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
+$taskData = [IO.Path]::GetFullPath((Join-Path $taskRoot '.state\tasks'))
+$stateDir = Join-Path $taskRoot '.state'
+$actionServer = Join-Path $env:USERPROFILE '.local\bin\action-server.exe'
 
 & (Join-Path $PSScriptRoot 'setup.ps1')
-if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Python setup failed.' }
+if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Managed Python setup failed.' }
+if (-not (Test-Path -LiteralPath $actionServer)) { throw 'The official action-server.exe is missing after setup.' }
+New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
 
-$runtimePython = Join-Path $taskRoot '.runtime\Scripts\python.exe'
-$oldPythonPath = $env:PYTHONPATH
 $oldActionsHome = $env:ACTIONS_HOME
+$hadActionsHome = Test-Path Env:ACTIONS_HOME
+$oldTeamsAccount = $env:OFFICE_BRIDGE_TEAMS_ACCOUNT
+$hadTeamsAccount = Test-Path Env:OFFICE_BRIDGE_TEAMS_ACCOUNT
 try {
-    $env:PYTHONPATH = Join-Path $taskRoot 'src'
-    if (-not $env:ACTIONS_HOME) {
-        $env:ACTIONS_HOME = Join-Path $env:LOCALAPPDATA 'OfficeActionServer\rcc-actions'
-    }
-    & $runtimePython (Join-Path $taskRoot 'scripts\bootstrap_runtime.py')
-    if ($LASTEXITCODE -ne 0) { throw 'RCC bootstrap failed.' }
+    if ([string]::IsNullOrWhiteSpace($env:ACTIONS_HOME)) { $env:ACTIONS_HOME = Join-Path $env:LOCALAPPDATA 'OfficeActionServer\rcc-actions' }
+    if (-not [string]::IsNullOrWhiteSpace($TeamsAccount)) { $env:OFFICE_BRIDGE_TEAMS_ACCOUNT = $TeamsAccount }
 
-    # Install the pinned SDK, then ask the SDK itself whether the Evergreen Runtime is present.
-    & $runtimePython -m office_bridge.runtime.sdk
+    # Install the pinned SDK, then use the SDK to check the Evergreen Runtime.
+    & $actionServer devenv --datadir $taskData task install-webview2
     if ($LASTEXITCODE -ne 0) { throw 'WebView2 SDK download or integrity verification failed.' }
     $sdkRoot = Join-Path $env:LOCALAPPDATA 'OfficeActionServer\webview2-sdk\1.0.4314.35'
     $coreDll = Join-Path $sdkRoot 'Microsoft.Web.WebView2.Core.dll'
@@ -30,7 +32,7 @@ try {
     $browserVersion = $null
     try { $browserVersion = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString() } catch { }
     if (-not $browserVersion) {
-        $installer = Join-Path $taskRoot '.state\MicrosoftEdgeWebView2Setup.exe'
+        $installer = Join-Path $stateDir 'MicrosoftEdgeWebView2Setup.exe'
         Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $installer
         $signature = Get-AuthenticodeSignature -LiteralPath $installer
         if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
@@ -54,19 +56,17 @@ try {
     $startArgs = @{ Dev = [bool]$Dev }
     if (-not [string]::IsNullOrWhiteSpace($TeamsAccount)) { $startArgs.TeamsAccount = $TeamsAccount }
     & $startScript @startArgs
-    if ($LASTEXITCODE -ne 0) { throw 'Office Action Server startup failed.' }
+    Remove-Item Env:OFFICE_BRIDGE_TEAMS_ACCOUNT -ErrorAction SilentlyContinue
 
-    $check = Join-Path $taskRoot 'scripts\bootstrap_check.py'
-    if (-not (Test-Path -LiteralPath $check)) { throw 'scripts/bootstrap_check.py is missing.' }
-    $checkArgs = @()
-    if ($Dev) { $checkArgs += '--dev' }
-    & $runtimePython $check @checkArgs
+    $verifyTask = if ($Dev) { 'verify-dev' } else { 'verify' }
+    & $actionServer devenv --datadir $taskData task $verifyTask
     if ($LASTEXITCODE -ne 0) { throw 'Bootstrap verification failed.' }
     if (-not $SkipCodex) {
-        & $runtimePython (Join-Path $taskRoot 'scripts\register_mcp.py') @checkArgs
+        $registerTask = if ($Dev) { 'register-dev' } else { 'register' }
+        & $actionServer devenv --datadir $taskData task $registerTask
         if ($LASTEXITCODE -ne 0) { throw 'Codex MCP registration failed.' }
     }
 } finally {
-    $env:PYTHONPATH = $oldPythonPath
-    $env:ACTIONS_HOME = $oldActionsHome
+    if ($hadActionsHome) { $env:ACTIONS_HOME = $oldActionsHome } else { Remove-Item Env:ACTIONS_HOME -ErrorAction SilentlyContinue }
+    if ($hadTeamsAccount) { $env:OFFICE_BRIDGE_TEAMS_ACCOUNT = $oldTeamsAccount } else { Remove-Item Env:OFFICE_BRIDGE_TEAMS_ACCOUNT -ErrorAction SilentlyContinue }
 }

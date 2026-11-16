@@ -20,6 +20,7 @@ teams-web/
 *.sqlite*
 *.exe
 *.pdf
+*.zip
 *.pem
 *.key
 .env

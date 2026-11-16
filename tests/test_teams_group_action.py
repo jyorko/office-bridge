@@ -39,7 +39,22 @@ def test_observed_receipt_reuses_only_same_destination(tmp_path, monkeypatch):
     assert calls == [
         (
             "teams_web_send_chat",
-            {"chat": CHAT.model_dump(mode="json"), "body": "test", "request_id": "test-1"},
+            {
+                "chat": CHAT.model_dump(mode="json"),
+                "body": "test",
+                "body_format": "plain",
+                "html": None,
+                "nodes": None,
+                "formatting": {
+                    "bold": [],
+                    "italic": [],
+                    "code": [],
+                    "links": [],
+                    "unordered_list": False,
+                    "ordered_list": False,
+                },
+                "request_id": "test-1",
+            },
         )
     ]
     other = WebChatRef(chat_id="19:" + "b" * 32 + "@thread.v2", title="Another Group")
@@ -59,6 +74,48 @@ def test_uncertain_send_cannot_be_retried(tmp_path, monkeypatch):
         with pytest.raises(ActionError):
             actions.teams_web_send_chat(CHAT, "test", "test-2")
     assert calls == ["teams_web_send_chat"]
+
+
+def test_markdown_send_passes_prepared_content_to_native(tmp_path, monkeypatch):
+    calls = []
+
+    def invoke(operation, arguments):
+        calls.append((operation, arguments))
+        return {
+            "state": "observed",
+            "message_id": "message-body-1234567890123",
+            "time": "2026-11-12T19:00:00Z",
+            "chat_id": CHAT.chat_id,
+            "title": CHAT.title,
+        }
+
+    setup_send(tmp_path, monkeypatch, invoke)
+    actions.teams_web_send_chat(
+        CHAT, "**hello** [guide](https://example.test)", "markdown-1", "markdown"
+    )
+    operation, arguments = calls[0]
+    assert operation == "teams_web_send_chat"
+    assert arguments["body"] == "hello guide"
+    assert arguments["body_format"] == "markdown"
+    assert "<strong>hello</strong>" in arguments["html"]
+    assert arguments["formatting"]["bold"] == ["hello"]
+    assert arguments["formatting"]["links"] == [{"text": "guide", "href": "https://example.test"}]
+
+
+def test_plain_and_markdown_sends_with_same_request_id_conflict(tmp_path, monkeypatch):
+    def invoke(operation, arguments):
+        return {
+            "state": "observed",
+            "message_id": "message-body-1234567890123",
+            "time": "2026-11-12T19:00:00Z",
+            "chat_id": CHAT.chat_id,
+            "title": CHAT.title,
+        }
+
+    setup_send(tmp_path, monkeypatch, invoke)
+    actions.teams_web_send_chat(CHAT, "**same**", "format-conflict", "markdown")
+    with pytest.raises(ActionError):
+        actions.teams_web_send_chat(CHAT, "**same**", "format-conflict", "plain")
 
 
 def test_legacy_self_send_id_is_never_reused(tmp_path, monkeypatch):

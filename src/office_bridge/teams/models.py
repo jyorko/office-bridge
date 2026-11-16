@@ -99,19 +99,28 @@ class WebChatRef(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     chat_id: Annotated[
         str,
-        Field(pattern=r"^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@thread\.(?:v2|skype))$"),
+        Field(
+            pattern=r"^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\.(?:v2|skype)|unq\.gbl\.spaces))$"
+        ),
     ]
     title: Annotated[str, Field(min_length=1, max_length=120)]
 
 
 class WebChatSearchResult(BaseModel):
     items: list[WebChatRef]
-    scope: Literal["currently_loaded_chat_list"]
+    scope: Literal["currently_loaded_chat_list", "teams_search"]
     truncated: bool
 
 
 class GroupReceipt(BaseModel):
     status: Literal["observed", "already_observed"]
+    chat: WebChatRef
+    message_id: str
+    time: str
+
+
+class EditReceipt(BaseModel):
+    status: Literal["edited", "already_edited"]
     chat: WebChatRef
     message_id: str
     time: str
