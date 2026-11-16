@@ -1,10 +1,8 @@
 """Exercise the browser-side guards against an isolated local Teams-shaped page."""
 
-import os
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import sync_playwright
 
 from office_bridge.teams.formatting import format_body
 
@@ -16,16 +14,10 @@ TITLE = "Example Group"
 
 
 @pytest.fixture
-def page():
-    executable = (
-        Path(os.environ.get("LOCALAPPDATA", ""))
-        / "robocorp/playwright/chromium-1254/chrome-win64/chrome.exe"
-    )
-    if not executable.is_file():
-        pytest.skip("isolated Chromium test browser is not installed")
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(executable_path=str(executable), headless=True)
-        page = browser.new_page()
+def page(isolated_browser):
+    context = isolated_browser.new_context()
+    try:
+        page = context.new_page()
         html = f"""<button data-tid="me-control-avatar-trigger" aria-label="person@example.invalid"></button>
         <div data-tid="app-bar-wrapper"><button aria-label="Chat"></button></div>
         <div role="treeitem" data-fui-tree-item-value="folder|{CHAT_ID}" onclick="window.navs=(window.navs||0)+1"><span>{TITLE}</span></div>
@@ -38,7 +30,8 @@ def page():
         )
         page.goto("https://teams.cloud.microsoft/")
         yield page
-        browser.close()
+    finally:
+        context.close()
 
 
 EMPTY_FORMATTING = {

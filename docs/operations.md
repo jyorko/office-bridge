@@ -10,6 +10,22 @@ Codex registration uses `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` by 
 
 Python action changes reload automatically in development. The host refreshes JavaScript between operations; an operation stops if its script bundle changes during execution. After changing the native C# host, run `action-server devenv --datadir .state/tasks task reload-teams`, then `action-server devenv --datadir .state/tasks task verify-teams-dev`. This reloads the isolated Teams host while the server UI stays available. The supervisor limits starts to three per five minutes; if recovery stops, use the normal server stop/start commands. Check `teams_web_status.restart_required` before sends.
 
+## Copilot Work IQ
+
+`teams_copilot_status` opens or checks a dedicated hidden Copilot pane in the launcher-owned Teams session. The host verifies the configured Teams account through Windows SSO and verifies the embedded Microsoft 365 Copilot surface and enabled Work IQ switch. An existing Copilot draft is preserved. This pane is separate from chat navigation and survives disposable Action Server workers.
+
+`teams_copilot_ask(question, request_id)` submits one explicitly authorized question, up to 2,000 characters, to the default Copilot experience. It does not choose another agent, switch Work IQ on, open source links, or confirm suggested actions. A durable private record is written before submission. Reusing a request ID for another question is refused; a completed or known submitted request returns its existing receipt. An uncertain submission is blocked from automatic replay.
+
+`teams_copilot_models` reads the current model dropdown and its enabled choices, then closes the menu without changing the selection. Pass an exact returned name as the optional `model` argument to `teams_copilot_ask`. The host selects that choice before entering the question and requires Work IQ to remain enabled. Omitting `model` preserves the existing selection. Model names are discovered from the current tenant UI, and a request ID is bound to both its question and requested model.
+
+`teams_copilot_select_model(model)` changes the selected dropdown choice without submitting a question and verifies the selection from the resulting menu. Existing drafts and unfinished queries block a change to another model.
+
+`teams_copilot_read(request_id)` reads that existing request without resubmitting. `awaiting_response` is not a completed answer. Completion requires the exact question in the observed conversation turn, a response with its completion controls, no active stop/busy indicator, and stable response text. The result contains up to 32,000 answer characters and 50 deduplicated HTTP(S) links observed inside the response. `citations_complete: false` means these are inline links, not an exhaustive export of the Sources panel. Copilot's factual claims still need assessment against the cited records.
+
+A `not_submitted` result means the current pane proves the original question was never clicked and its draft still matches. A subsequent explicit ask using that same question and request ID may continue it. Changed drafts and unknown outcomes remain blocked. Only one unfinished query is permitted in the pane. Captured completed results are cached under `%LOCALAPPDATA%/OfficeActionServer/copilot-queries` and remain readable after a host restart; an uncaptured pending query may become unavailable after navigation or restart and must not be silently resubmitted. Keep these private records recoverable alongside send ledgers.
+
+Run `action-server devenv --datadir .state/tasks task test-copilot` for isolated guard and recovery tests. These tests never contact Microsoft or submit a live question. Use a separately authorized question for live verification.
+
 ## Evidence packs and Devsy delivery
 
 `evidence_pack_create` accepts a typed pack with a title, caller-authored Markdown summary, explicit source records (`reference`, `captured_at`, `content`), and coverage limitations. It creates a content-addressed ZIP under `%LOCALAPPDATA%/OfficeActionServer/evidence-packs`. The archive contains `README.md`, `evidence.json`, and `manifest.json`; the summary is labelled as caller-authored. Packs are bounded to 100 source records and 1 MiB total. The action does not fetch additional sources automatically.

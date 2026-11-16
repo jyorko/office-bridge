@@ -40,6 +40,10 @@ public sealed class TeamsSession : ApplicationContext
     CoreWebView2Environment environment;
     CoreWebView2Controller controller;
     CoreWebView2Controller auxiliaryController;
+    CoreWebView2Controller copilotController;
+    Form copilotHost;
+    readonly List<CoreWebView2Frame> copilotFrames = new List<CoreWebView2Frame>();
+    readonly List<CoreWebView2Frame> auxiliaryFrames = new List<CoreWebView2Frame>();
     Form auxiliaryHost;
     FileStream profileLock;
     System.Windows.Forms.Timer foregroundTimer;
@@ -48,6 +52,7 @@ public sealed class TeamsSession : ApplicationContext
     string currentAccountName;
     string groupScript;
     string lookupScript;
+    string copilotScript, copilotPath, copilotDigest;
     string scriptPath, formattingPath, nativePath, lookupPath;
     string scriptDigest, formattingDigest, nativeDigest, lookupDigest;
 
@@ -138,6 +143,7 @@ public sealed class TeamsSession : ApplicationContext
             string nativeDirectory = Path.GetDirectoryName(scriptPath) ?? "";
             formattingPath = Path.Combine(nativeDirectory, "formatting.js");
             lookupPath = Path.Combine(nativeDirectory, "lookup.js");
+            copilotPath = Path.Combine(nativeDirectory, "copilot.js");
             nativeDigest = FileDigest(nativePath);
             RefreshScripts();
             if (String.IsNullOrEmpty(expectedAccount) ||
@@ -186,7 +192,8 @@ public sealed class TeamsSession : ApplicationContext
     }
     bool HostVisible()
     {
-        return host.Visible || (auxiliaryHost != null && auxiliaryHost.Visible);
+        return host.Visible || (auxiliaryHost != null && auxiliaryHost.Visible) ||
+               (copilotHost != null && copilotHost.Visible);
     }
     async Task<CoreWebView2> EnsureAuxiliary()
     {
@@ -200,6 +207,7 @@ public sealed class TeamsSession : ApplicationContext
             auxiliaryController.Bounds = new Rectangle(0, 0, 1200, 900);
             auxiliaryController.IsVisible = true;
             var core = auxiliaryController.CoreWebView2;
+            core.FrameCreated += (s, e) => TrackAuxiliaryFrame(e.Frame);
             core.Settings.IsWebMessageEnabled = false;
             core.Settings.AreHostObjectsAllowed = false;
             core.Settings.AreDefaultScriptDialogsEnabled = false;
@@ -220,6 +228,186 @@ public sealed class TeamsSession : ApplicationContext
             throw new InvalidOperationException("foreground_interference");
         }
         return auxiliaryController.CoreWebView2;
+    }
+    void TrackAuxiliaryFrame(CoreWebView2Frame frame)
+    {
+        TrackFrame(frame, auxiliaryFrames);
+    }
+    void TrackFrame(CoreWebView2Frame frame, List<CoreWebView2Frame> frames)
+    {
+        if (frames.Count >= 100) return;
+        frames.Add(frame);
+        frame.FrameCreated += (s, e) => TrackFrame(e.Frame, frames);
+        frame.Destroyed += (s, e) => frames.Remove(frame);
+    }
+    async Task<CoreWebView2Frame> CopilotFrame()
+    {
+        if (copilotController == null)
+        {
+            copilotHost = new Form { ShowInTaskbar = false, ClientSize = new Size(1200, 900) };
+            copilotController = await environment.CreateCoreWebView2ControllerAsync(copilotHost.Handle);
+            copilotController.Bounds = new Rectangle(0, 0, 1200, 900);
+            copilotController.IsVisible = true;
+            var created = copilotController.CoreWebView2;
+            created.Settings.IsWebMessageEnabled = false;
+            created.Settings.AreHostObjectsAllowed = false;
+            created.Settings.AreDefaultScriptDialogsEnabled = false;
+            created.FrameCreated += (s, e) => TrackFrame(e.Frame, copilotFrames);
+            created.NewWindowRequested += (s, e) => { e.Handled = true; };
+            created.LaunchingExternalUriScheme += (s, e) => { e.Cancel = true; };
+            created.PermissionRequested += (s, e) => { e.State = CoreWebView2PermissionState.Deny; e.Handled = true; };
+            created.BasicAuthenticationRequested += (s, e) => { e.Cancel = true; };
+            created.ProcessFailed += (s, e) => { error = "browser_failed"; };
+            created.Navigate("https://teams.cloud.microsoft/");
+        }
+        var core = copilotController.CoreWebView2;
+        var deadline = DateTime.UtcNow.AddSeconds(40);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (HostVisible() || OwnedForeground()) throw new InvalidOperationException("foreground_interference");
+            if (await AuxiliaryAuthenticated(core)) break;
+            await Task.Delay(250);
+        }
+        if (!await AuxiliaryAuthenticated(core)) throw new InvalidOperationException("identity_failed");
+        var opened = await ExecuteLookup(core, new Dictionary<string, object> { {"phase", "open_copilot"} });
+        string openState = Convert.ToString(opened["state"]);
+        if (openState != "copilot_already_open" && openState != "copilot_open_clicked")
+            throw new InvalidOperationException(openState);
+        deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            CoreWebView2Frame selected = null;
+            foreach (var frame in copilotFrames.ToArray())
+            {
+                if (DateTime.UtcNow >= deadline) break;
+                if (frame.IsDestroyed() != 0) continue;
+                var value = await ExecuteCopilot(frame, new Dictionary<string, object> { {"phase", "status"} });
+                string state = Convert.ToString(value["state"]);
+                if (state == "ready" || state == "not_ready")
+                {
+                    if (selected != null) throw new InvalidOperationException("copilot_frame_ambiguous");
+                    selected = frame;
+                }
+            }
+            if (selected != null) return selected;
+            await Task.Delay(250);
+        }
+        throw new TimeoutException("copilot_not_ready");
+    }
+    async Task<Dictionary<string, object>> ExecuteCopilot(CoreWebView2Frame frame, Dictionary<string, object> args)
+    {
+        if (!ScriptsUnchanged()) throw new InvalidOperationException("script_changed_during_operation");
+        if (HostVisible() || OwnedForeground()) throw new InvalidOperationException("foreground_interference");
+        var execution = frame.ExecuteScriptAsync("(" + copilotScript + ")(" + Json.Serialize(args) + ")");
+        if (await Task.WhenAny(execution, Task.Delay(5000)) != execution)
+            throw new TimeoutException("copilot_script_timeout");
+        var result = Json.Deserialize<Dictionary<string, object>>(await execution);
+        if (!ScriptsUnchanged()) throw new InvalidOperationException("script_changed_during_operation");
+        if (HostVisible() || OwnedForeground()) throw new InvalidOperationException("foreground_interference");
+        if (result == null)
+        {
+            string phase=Convert.ToString(args["phase"]);
+            if (phase == "status" || phase == "inspect")
+                return new Dictionary<string, object> { {"state", "frame_loading"} };
+            throw new InvalidOperationException("copilot_guard_failed");
+        }
+        return result;
+    }
+    async Task<Dictionary<string, object>> CopilotOperation(string operation, Dictionary<string, object> args)
+    {
+        var status = await Status();
+        if (Convert.ToString(status["state"]) != "authenticated" || Flag(status, "restart_required"))
+            throw new InvalidOperationException("identity_failed");
+        string snapshot = await PrimarySnapshot();
+        var frame = await CopilotFrame();
+        if (snapshot != await PrimarySnapshot())
+        {
+            if (operation == "teams_copilot_status")
+                return new Dictionary<string, object> { {"state", "not_ready"},
+                    {"work_iq_enabled", false}, {"composer_nonempty", true} };
+            throw new InvalidOperationException("primary_state_changed");
+        }
+        if (operation == "teams_copilot_status")
+            return await ExecuteCopilot(frame, new Dictionary<string, object> { {"phase", "status"} });
+        if (operation == "teams_copilot_models")
+        {
+            object selectedModel;
+            if (args.TryGetValue("model", out selectedModel))
+            {
+                if (!(selectedModel is string) || ((string)selectedModel).Length < 1 ||
+                    ((string)selectedModel).Length > 120) throw new InvalidDataException();
+                await CopilotModelOperation(frame, "select_model", (string)selectedModel);
+            }
+            var catalog = await CopilotModelOperation(frame, "models", null);
+            if (snapshot != await PrimarySnapshot()) throw new InvalidOperationException("primary_state_changed");
+            return catalog;
+        }
+        object rawId;
+        if (!args.TryGetValue("request_id", out rawId) || !(rawId is string) ||
+            !Regex.IsMatch((string)rawId, "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) throw new InvalidDataException();
+        var request = new Dictionary<string, object> { {"requestId", rawId} };
+        if (operation == "teams_copilot_ask")
+        {
+            object model;
+            if (args.TryGetValue("model", out model) && model != null)
+            {
+                if (!(model is string) || ((string)model).Length < 1 || ((string)model).Length > 120)
+                    throw new InvalidDataException();
+                await CopilotModelOperation(frame, "select_model", (string)model);
+            }
+            object question;
+            if (!args.TryGetValue("question", out question) || !(question is string) ||
+                ((string)question).Length < 1 || ((string)question).Length > 2000) throw new InvalidDataException();
+            request["question"] = question;
+            request["phase"] = "prepare";
+            var prepared = await ExecuteCopilot(frame, request);
+            if (Convert.ToString(prepared["state"]) != "prepared")
+                throw new InvalidOperationException(Convert.ToString(prepared["state"]));
+            if (snapshot != await PrimarySnapshot()) throw new InvalidOperationException("primary_state_changed");
+            request["phase"] = "submit";
+        }
+        else request["phase"] = "read";
+        var result = await ExecuteCopilot(frame, request);
+        if (snapshot != await PrimarySnapshot()) throw new InvalidOperationException("primary_state_changed");
+        return result;
+    }
+    async Task<Dictionary<string, object>> CopilotModelOperation(CoreWebView2Frame frame, string phase, string model)
+    {
+        var deadline=DateTime.UtcNow.AddSeconds(8);
+        while(DateTime.UtcNow<deadline)
+        {
+            var value=await ExecuteCopilot(frame,new Dictionary<string,object>{{"phase",phase},{"model",model}});
+            string state=Convert.ToString(value["state"]);
+            if(state=="models" || state=="model_selected") return value;
+            if(state!="model_menu_opening" && state!="model_selection_pending")
+                throw new InvalidOperationException(state);
+            await Task.Delay(150);
+        }
+        throw new TimeoutException("model_selector_timeout");
+    }
+    async Task<List<object>> InspectAuxiliaryFrames()
+    {
+        var result = new List<object>();
+        var tracked = new List<CoreWebView2Frame>(auxiliaryFrames);
+        tracked.AddRange(copilotFrames);
+        int inspected = 0;
+        foreach (var frame in tracked.ToArray())
+        {
+            if (inspected++ >= 8) break;
+            if (frame.IsDestroyed() != 0) continue;
+            try {
+                var value = await ExecuteCopilot(frame, new Dictionary<string, object> { {"phase", "inspect"} });
+                if (Convert.ToString(value["state"]) != "unsupported_surface") {
+                    value["frame_id"] = frame.FrameId;
+                    result.Add(value);
+                }
+            } catch (COMException) {
+                result.Add(new Dictionary<string, object> { {"state", "frame_unavailable"} });
+            } catch (TimeoutException) {
+                result.Add(new Dictionary<string, object> { {"state", "frame_timeout"} });
+            }
+        }
+        return result;
     }
     async Task<bool> AuxiliaryAuthenticated(CoreWebView2 core)
     {
@@ -560,6 +748,10 @@ public sealed class TeamsSession : ApplicationContext
              Convert.ToString(resultState) != "diagnostics"))
             throw new InvalidOperationException("host_operation_failed");
         await VerifyCrossChat(context, authorName);
+        if (inspectCopilot)
+        {
+            result["embedded_surfaces"] = await InspectAuxiliaryFrames();
+        }
         if (snapshotPrimary)
             result["primary_snapshot"] = primaryMetadata;
         return result;
@@ -599,26 +791,30 @@ public sealed class TeamsSession : ApplicationContext
     }
     void RefreshScripts()
     {
-        string chatDigest, formatDigest, lookupCurrentDigest;
+        string chatDigest, formatDigest, lookupCurrentDigest, copilotCurrentDigest;
         string chat = ReadScriptSnapshot(scriptPath, out chatDigest);
         string formatting = ReadScriptSnapshot(formattingPath, out formatDigest);
         string lookup = ReadScriptSnapshot(lookupPath, out lookupCurrentDigest);
+        string copilot = ReadScriptSnapshot(copilotPath, out copilotCurrentDigest);
         if (String.IsNullOrWhiteSpace(chat) || String.IsNullOrWhiteSpace(formatting) ||
             String.IsNullOrWhiteSpace(lookup) || chatDigest != FileDigest(scriptPath) ||
-            formatDigest != FileDigest(formattingPath) || lookupCurrentDigest != FileDigest(lookupPath))
+            formatDigest != FileDigest(formattingPath) || lookupCurrentDigest != FileDigest(lookupPath) ||
+            copilotCurrentDigest != FileDigest(copilotPath))
             throw new IOException("The Teams JavaScript bundle changed while it was loading.");
         groupScript = "(request) => (" + chat + ")(request, " + formatting + ")";
         lookupScript = lookup;
+        copilotScript = copilot;
         scriptDigest = chatDigest;
         formattingDigest = formatDigest;
         lookupDigest = lookupCurrentDigest;
+        copilotDigest = copilotCurrentDigest;
     }
     bool ScriptsUnchanged()
     {
         return scriptDigest != null && formattingDigest != null && lookupDigest != null &&
                scriptDigest == FileDigest(scriptPath) &&
                formattingDigest == FileDigest(formattingPath) &&
-               lookupDigest == FileDigest(lookupPath);
+               lookupDigest == FileDigest(lookupPath) && copilotDigest == FileDigest(copilotPath);
     }
     async Task<Dictionary<string, object>> ExecuteChat(
         CoreWebView2 core, Dictionary<string, object> request)
@@ -849,6 +1045,14 @@ public sealed class TeamsSession : ApplicationContext
         string op = Convert.ToString(operation);
         if (op == "teams_web_status")
             return await Status();
+        if (op == "teams_copilot_status" || op == "teams_copilot_models" ||
+            op == "teams_copilot_ask" || op == "teams_copilot_read")
+        {
+            object raw;
+            if (!request.TryGetValue("arguments", out raw) || !(raw is Dictionary<string, object>))
+                throw new InvalidDataException();
+            return await CopilotOperation(op, (Dictionary<string, object>)raw);
+        }
         if (op == "teams_web_find_chats")
         {
             object raw;
@@ -1429,7 +1633,12 @@ public sealed class TeamsSession : ApplicationContext
                             "primary_state_changed", "script_changed_during_operation",
                             "workspace_unavailable", "search_control_unavailable", "lookup_timeout",
                             "lookup_ambiguous_use_email", "lookup_results_unverified",
-                            "lookup_selection_unverified", "lookup_resolution_unverified"
+                            "lookup_selection_unverified", "lookup_resolution_unverified",
+                            "copilot_script_timeout", "copilot_not_ready", "copilot_frame_ambiguous",
+                            "copilot_guard_failed", "not_ready", "input_failed", "input_unverified",
+                            "submit_unavailable", "draft_changed", "query_in_progress",
+                            "model_selector_unavailable", "model_menu_ambiguous", "model_menu_unverified",
+                            "model_unavailable", "model_selector_timeout"
                         };
                         if (!safeReasons.Contains(reason))
                             reason = "host_operation_failed";
@@ -1487,6 +1696,8 @@ public sealed class TeamsSession : ApplicationContext
             controller.Close();
         if (auxiliaryController != null)
             auxiliaryController.Close();
+        if (copilotController != null)
+            copilotController.Close();
         if (profileLock != null)
         {
             try
@@ -1500,6 +1711,8 @@ public sealed class TeamsSession : ApplicationContext
         }
         if (auxiliaryHost != null)
             auxiliaryHost.Dispose();
+        if (copilotHost != null)
+            copilotHost.Dispose();
         host.Dispose();
         base.ExitThreadCore();
     }

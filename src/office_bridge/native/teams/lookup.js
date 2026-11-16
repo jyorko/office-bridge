@@ -304,10 +304,17 @@
         parent_tid: element.parentElement?.getAttribute('data-tid') || '',
         href: element.getAttribute('href') || ''
       })) : [];
+  const frames = Array.from(document.querySelectorAll('iframe')).slice(0, 20).map(element => {
+    let origin = '', path = '';
+    try { const url = new URL(element.src, location.href); origin = url.origin; path = url.pathname; }
+    catch (_) {}
+    return {...meta(element), origin, path, visible: visible(element),
+      accessible_document: !!element.contentDocument};
+  });
   return {
     state: 'diagnostics',
     page: {hostname: location.hostname, path: location.pathname},
     composer: {editor_count: editors.length, dirty: editors.some(hasDraft)},
-    controls: {inputs, buttons, links, regions, headings, popup: popup ? meta(popup) : null, popupChildren}
+    controls: {inputs, buttons, links, regions, headings, frames, popup: popup ? meta(popup) : null, popupChildren}
   };
 }

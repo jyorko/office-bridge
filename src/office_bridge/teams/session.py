@@ -24,6 +24,21 @@ HOST_ERRORS = frozenset(
         "lookup_results_unverified",
         "lookup_selection_unverified",
         "lookup_resolution_unverified",
+        "copilot_script_timeout",
+        "copilot_not_ready",
+        "copilot_frame_ambiguous",
+        "copilot_guard_failed",
+        "not_ready",
+        "input_failed",
+        "input_unverified",
+        "submit_unavailable",
+        "draft_changed",
+        "query_in_progress",
+        "model_selector_unavailable",
+        "model_menu_ambiguous",
+        "model_menu_unverified",
+        "model_unavailable",
+        "model_selector_timeout",
     }
 )
 
@@ -35,6 +50,10 @@ class SessionError(RuntimeError):
 def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
     if operation not in {
         "teams_web_status",
+        "teams_copilot_status",
+        "teams_copilot_models",
+        "teams_copilot_ask",
+        "teams_copilot_read",
         "teams_web_list_chats",
         "teams_web_find_chats",
         "teams_web_read_chat",

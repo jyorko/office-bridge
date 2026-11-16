@@ -6424,6 +6424,667 @@
         "x-openai-isConsequential": true,
         "x-operation-kind": "action"
       }
+    },
+    "/api/actions/desktop-office/teams-copilot-status/run": {
+      "post": {
+        "summary": "Teams Copilot Status",
+        "description": "Check the hidden Copilot pane and Work IQ without submitting a question.",
+        "operationId": "teams_copilot_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "not_ready"
+                              ],
+                              "title": "State"
+                            },
+                            "work_iq_enabled": {
+                              "type": "boolean",
+                              "title": "Work Iq Enabled"
+                            },
+                            "composer_nonempty": {
+                              "type": "boolean",
+                              "title": "Composer Nonempty"
+                            },
+                            "model": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Model"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "state",
+                            "work_iq_enabled",
+                            "composer_nonempty"
+                          ],
+                          "title": "CopilotStatus"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Copilot Status"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-copilot-ask/run": {
+      "post": {
+        "summary": "Teams Copilot Ask",
+        "description": "Submit one authorized question to default Microsoft 365 Copilot with Work IQ on.",
+        "operationId": "teams_copilot_ask",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "title": "Question",
+                    "description": "User-authorized question. This sends content to Microsoft 365 Copilot."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "title": "Request Id",
+                    "description": "Unique ID for the question; uncertain submissions cannot be replayed."
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Model",
+                    "description": "Exact enabled name returned by teams_copilot_models; omit to keep the selected model."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "question",
+                  "request_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "request_id": {
+                              "type": "string",
+                              "title": "Request Id"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "not_submitted",
+                                "awaiting_response",
+                                "completed"
+                              ],
+                              "title": "Status"
+                            },
+                            "submission_verified": {
+                              "type": "boolean",
+                              "title": "Submission Verified"
+                            },
+                            "model": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Model"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "request_id",
+                            "status",
+                            "submission_verified"
+                          ],
+                          "title": "QueryReceipt"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Copilot Ask"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-copilot-read/run": {
+      "post": {
+        "summary": "Teams Copilot Read",
+        "description": "Read an existing Copilot query's settled response and observed citation links.",
+        "operationId": "teams_copilot_read",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "request_id": {
+                    "type": "string",
+                    "title": "Request Id",
+                    "description": "The original question ID; this action never submits another question."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "request_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "request_id": {
+                              "type": "string",
+                              "title": "Request Id"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "not_submitted",
+                                "awaiting_response",
+                                "completed"
+                              ],
+                              "title": "Status"
+                            },
+                            "submission_verified": {
+                              "type": "boolean",
+                              "title": "Submission Verified"
+                            },
+                            "answer": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 32000
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Answer"
+                            },
+                            "citations": {
+                              "items": {
+                                "properties": {
+                                  "title": {
+                                    "type": "string",
+                                    "maxLength": 500,
+                                    "title": "Title"
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "maxLength": 4000,
+                                    "pattern": "^https?://",
+                                    "title": "Url"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "title",
+                                  "url"
+                                ],
+                                "title": "Citation"
+                              },
+                              "type": "array",
+                              "maxItems": 50,
+                              "title": "Citations"
+                            },
+                            "work_iq_enabled": {
+                              "type": "boolean",
+                              "title": "Work Iq Enabled"
+                            },
+                            "conversation_url": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 4000,
+                                  "pattern": "^https://"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Conversation Url"
+                            },
+                            "response_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 200
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Response Id"
+                            },
+                            "citations_complete": {
+                              "type": "boolean",
+                              "title": "Citations Complete",
+                              "default": false
+                            },
+                            "model": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Model"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "request_id",
+                            "status",
+                            "submission_verified",
+                            "work_iq_enabled"
+                          ],
+                          "title": "QueryResult"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Copilot Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-copilot-models/run": {
+      "post": {
+        "summary": "Teams Copilot Models",
+        "description": "Read the available model dropdown choices without changing the selected model.",
+        "operationId": "teams_copilot_models",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "model": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Model"
+                            },
+                            "models": {
+                              "items": {
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "title": "Name"
+                                  },
+                                  "selected": {
+                                    "type": "boolean",
+                                    "title": "Selected"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean",
+                                    "title": "Enabled"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "selected",
+                                  "enabled"
+                                ],
+                                "title": "ModelOption"
+                              },
+                              "type": "array",
+                              "maxItems": 30,
+                              "title": "Models"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "model",
+                            "models"
+                          ],
+                          "title": "ModelCatalog"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Copilot Models"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-copilot-select-model/run": {
+      "post": {
+        "summary": "Teams Copilot Select Model",
+        "description": "Select an enabled Copilot dropdown choice without submitting a question.",
+        "operationId": "teams_copilot_select_model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "title": "Model",
+                    "description": "Exact enabled name returned by teams_copilot_models."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "model"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "model": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Model"
+                            },
+                            "models": {
+                              "items": {
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "minLength": 1,
+                                    "title": "Name"
+                                  },
+                                  "selected": {
+                                    "type": "boolean",
+                                    "title": "Selected"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean",
+                                    "title": "Enabled"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "selected",
+                                  "enabled"
+                                ],
+                                "title": "ModelOption"
+                              },
+                              "type": "array",
+                              "maxItems": 30,
+                              "title": "Models"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "model",
+                            "models"
+                          ],
+                          "title": "ModelCatalog"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Copilot Select Model"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
     }
   },
   "components": {

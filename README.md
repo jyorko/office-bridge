@@ -30,6 +30,7 @@ src/
   outlook_actions.py          Outlook and attachment entrypoints
   desktop_teams_actions.py    Windows UI Automation entrypoints
   teams_actions.py            Persistent background Teams entrypoints
+  copilot_actions.py          Microsoft 365 Copilot Work IQ queries
   evidence_actions.py         Evidence bundle creation and Devsy delivery
   office_bridge/              Models, bridges, services, runtime helpers, native assets
 bootstrap.ps1                 Fresh-clone entry point
@@ -62,5 +63,9 @@ Teams exposes general chat search, list, read, send, and edit actions. Use `team
 Sending and editing require explicit user authorization. Editing also requires the exact message ID and its current text. Unknown outcomes are never automatically retried. Verification does not send or edit messages. See [operations](docs/operations.md) for configuration and diagnostics.
 
 Evidence actions create a private ZIP containing a handoff, explicit source records, and checksum manifest. After user authorization, a delivery action sends the selected pack to a named Devsy workspace and verifies the received hashes. See [evidence delivery](docs/operations.md#evidence-packs-and-devsy-delivery) for prerequisites and limits.
+
+Copilot actions use a separate hidden Teams pane with Work IQ enabled. Check `teams_copilot_status`, submit an authorized question once with `teams_copilot_ask`, then call `teams_copilot_read` with the same request ID until its response is settled. Results contain the answer and observed inline source links. See [Copilot operations](docs/operations.md#copilot-work-iq) for limits and recovery behavior.
+
+Use `teams_copilot_models` to discover the available dropdown choices. The optional `model` argument on `teams_copilot_ask` selects an enabled choice; omitting it keeps the current selection.
 
 See [architecture](docs/architecture.md) for package boundaries and persistent-session ownership.

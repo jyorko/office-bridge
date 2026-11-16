@@ -2,7 +2,7 @@
 
 ## Public actions
 
-`src/outlook_actions.py`, `src/desktop_teams_actions.py`, and `src/teams_actions.py` contain typed entrypoints. Action names and input/output schemas remain the public contract. They import models and operations from `office_bridge`; action modules do not import one another.
+`src/outlook_actions.py`, `src/desktop_teams_actions.py`, `src/teams_actions.py`, `src/copilot_actions.py`, and `src/evidence_actions.py` contain typed entrypoints. Action names and input/output schemas remain the public contract. They import models and operations from `office_bridge`; action modules do not import one another.
 
 `office_bridge/outlook/models.py` contains Outlook schemas. `office_bridge/teams/models.py` contains desktop and web Teams schemas. Shared boundary constraints live in `office_bridge/models.py`.
 
@@ -12,6 +12,7 @@
 - `office_bridge/teams/service.py` owns background reads and durable send/edit reservations. The existing group SQLite ledger and self-send ledger retain their locations and unknown-outcome behavior. Edit records use a separate table in the group ledger.
 - `office_bridge/teams/formatting.py` converts bounded Markdown to visible text, sanitized HTML, and expected formatting for browser verification.
 - `office_bridge/teams/lookup.py` validates directory search results before exposing exact chat references.
+- `office_bridge/teams/copilot.py` owns Copilot query contracts, private durable reservations, verified result caching, and model-choice validation.
 - `office_bridge/teams/session.py` is the bounded named-pipe client for the launcher-owned Teams host.
 - `office_bridge/teams/backend.py` validates WebView2 status and retains optional Chromium/Edge diagnostics.
 - `office_bridge/runtime/supervisor.py` owns the hidden host lifecycle. `runtime/sdk.py` verifies the pinned SDK archive and DLL hashes.
@@ -20,6 +21,8 @@
 ## Persistent Teams session
 
 The launcher starts one hidden WebView2 host before disposable Action Server workers. Its STA message loop keeps the controller alive between calls. The host owns the persistent-profile lock and serializes local named-pipe requests. A second hidden WebView2 controller in the same host handles protected rich-content composition without changing the Windows clipboard. It is not a separate HTTP or MCP server.
+
+A third controller is created on first Copilot use. It keeps the Copilot conversation separate from chat navigation and accesses the embedded Microsoft 365 pane through the supported WebView2 frame API. Work IQ and the question's exact conversation turn are checked in that pane. The initial query call submits at most once; later reads wait for settled text and collect observed inline links. Model choices come from the current dropdown and can be selected before a question is entered. No normal browser profile or authentication tokens are copied.
 
 The host uses the existing Windows account SSO and dedicated profile. Teams refreshes that profile's own authentication; normal browser cookies are not copied. Authentication challenges are reported rather than bypassed.
 

@@ -1,8 +1,6 @@
-import os
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import sync_playwright
 
 from office_bridge.teams.formatting import format_body
 
@@ -11,16 +9,10 @@ SCRIPT = (ROOT / "src/office_bridge/native/teams/formatting.js").read_text(encod
 
 
 @pytest.fixture
-def page():
-    executable = (
-        Path(os.environ.get("LOCALAPPDATA", ""))
-        / "robocorp/playwright/chromium-1254/chrome-win64/chrome.exe"
-    )
-    if not executable.is_file():
-        pytest.skip("isolated Chromium test browser is not installed")
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(executable_path=str(executable), headless=True)
-        page = browser.new_page()
+def page(isolated_browser):
+    context = isolated_browser.new_context()
+    try:
+        page = context.new_page()
         page.set_content(
             """<!doctype html><html><head>
             <meta http-equiv="Content-Security-Policy"
@@ -28,7 +20,8 @@ def page():
             </head><body><div id="root"></div></body></html>"""
         )
         yield page
-        browser.close()
+    finally:
+        context.close()
 
 
 def render(page, nodes):

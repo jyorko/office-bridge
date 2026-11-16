@@ -26,6 +26,7 @@ dev-tasks:
   format-check: ruff format --check src scripts tests
   test-edit: python -m pytest tests/test_teams_web_dom.py tests/test_teams_message_edit.py -q
   test-evidence: python -m pytest tests/test_evidence.py -q
+  test-copilot: python -m pytest tests/test_copilot.py tests/test_copilot_dom.py -q
   bootstrap-rcc: python scripts/bootstrap_runtime.py
   prepare: python scripts/prepare_state.py
   prepare-dev: python scripts/prepare_state.py --dev
