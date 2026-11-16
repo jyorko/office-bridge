@@ -361,6 +361,14 @@ public sealed class TeamsSession : ApplicationContext
             request["question"] = question;
             request["phase"] = "prepare";
             var prepared = await ExecuteCopilot(frame, request);
+            var inputDeadline = DateTime.UtcNow.AddSeconds(2);
+            while (Convert.ToString(prepared["state"]) == "input_unverified" &&
+                   DateTime.UtcNow < inputDeadline)
+            {
+                await Task.Delay(100);
+                request["phase"] = "verify_prepare";
+                prepared = await ExecuteCopilot(frame, request);
+            }
             if (Convert.ToString(prepared["state"]) != "prepared")
                 throw new InvalidOperationException(Convert.ToString(prepared["state"]));
             if (snapshot != await PrimarySnapshot()) throw new InvalidOperationException("primary_state_changed");

@@ -84,6 +84,37 @@ def test_copilot_guards_drafts_work_iq_and_duplicate_clicks(page):  # noqa: F811
     assert page.evaluate("window.clicks") == 1
 
 
+def test_delayed_editor_update_is_verified_without_reinserting_or_sending(page):  # noqa: F811
+    html = """<button role="switch" aria-label="Turn off Work IQ" aria-checked="true">Work IQ</button>
+      <span style="display:inline-block;min-width:100px;min-height:30px" id="m365-chat-editor-target-element" role="textbox" aria-label="Message Copilot" contenteditable="true" data-lexical-editor="true"></span>
+      <button aria-label="Send" onclick="window.clicks=(window.clicks||0)+1">Send</button>"""
+    page.route(
+        "https://m365copilotapp.svc.cloud.microsoft/**",
+        lambda route: route.fulfill(body=html, content_type="text/html"),
+    )
+    page.goto("https://m365copilotapp.svc.cloud.microsoft/chat")
+    page.evaluate("""()=>{document.execCommand=()=>{
+      window.insertions=(window.insertions||0)+1;return true;
+    }}""")
+
+    def run(phase):
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)",
+            [SCRIPT, {"phase": phase, "question": "Find decisions", "requestId": "delayed-1"}],
+        )
+
+    assert run("prepare")["state"] == "input_unverified"
+    assert run("verify_prepare")["state"] == "input_unverified"
+    page.locator('[role="textbox"]').fill("Find decisions")
+    assert run("verify_prepare")["state"] == "prepared"
+    assert page.evaluate("window.insertions") == 1
+    assert page.evaluate("window.clicks||0") == 0
+    page.locator('[role="textbox"]').fill("Changed draft")
+    assert run("verify_prepare")["state"] == "input_unverified"
+    assert run("submit")["state"] == "draft_changed"
+    assert page.evaluate("window.clicks||0") == 0
+
+
 def test_model_dropdown_is_discovered_and_changes_only_an_enabled_choice(page):  # noqa: F811
     html = """<button role="switch" aria-label="Turn off Work IQ" aria-checked="true">Work IQ</button>
       <span style="display:inline-block;min-width:100px;min-height:30px" id="m365-chat-editor-target-element" role="textbox" aria-label="Message Copilot" contenteditable="true" data-lexical-editor="true"></span>

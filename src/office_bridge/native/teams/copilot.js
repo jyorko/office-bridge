@@ -69,6 +69,14 @@
     selected[0].element.click();window.__officeCopilotModelMenu=null;
     return {state:'model_selection_pending'};
   }
+  if (request.phase === 'verify_prepare') {
+    const previous=window.__officeCopilotQuery;
+    if (!previous || previous.requestId!==request.requestId ||
+        previous.question!==request.question) return {state:'request_missing'};
+    if (previous.clicked) return {state:'already_clicked'};
+    if (!editor || !workEnabled) return {state:'not_ready'};
+    return {state:text(editor)===previous.question.trim() ? 'prepared' : 'input_unverified'};
+  }
   if (request.phase === 'prepare') {
     if (!editor || !workEnabled || editor.getAttribute('data-lexical-editor') !== 'true')
       return {state:'not_ready'};
