@@ -10,7 +10,7 @@
 
 ## Setup and ownership
 
-- Fresh clone: `./bootstrap.ps1 -Dev -TeamsAccount your.name@company.com`. The account is saved privately. Omit `-Dev` for authentication. `-PrepareOnly` installs prerequisites without startup; `-SkipCodex` skips client registration.
+- Fresh clone: `./bootstrap.ps1 -Dev`. Bootstrap reuses the privately saved Teams account or detects the signed-in Windows work account. `-TeamsAccount your.name@company.com` overrides detection. Omit `-Dev` for authentication. `-PrepareOnly` installs prerequisites without startup; `-SkipCodex` skips client registration.
 - Root `bootstrap.ps1` is the entry point. PowerShell lifecycle scripts belong in `powershell/`; Python lifecycle and verification scripts belong in `scripts/`.
 - Implementation belongs in `src/`, including native PowerShell, C#, and JavaScript. Never leave required implementation only in ignored state or installed environments.
 - Start: `./powershell/start-office.ps1 -Dev`. Stop: `./powershell/stop-office.ps1`. Inspect the recorded process and listener before changing an existing server. Do not launch duplicate servers or silently rotate keys.

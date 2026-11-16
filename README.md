@@ -7,12 +7,12 @@ Local Outlook and Teams actions for Windows, served by the community Actions Run
 Run from a fresh clone on Windows, under your signed-in work account:
 
 ```powershell
-./bootstrap.ps1 -Dev -TeamsAccount your.name@company.com
+./bootstrap.ps1 -Dev
 ```
 
 Bootstrap installs the pinned Actions Runtime executable, prepares RCC with Windows certificate trust, installs the verified WebView2 SDK and any missing WebView2 Runtime, starts the background server, verifies Teams through MCP, and registers the endpoint in Codex. It never sends a test message. Classic Outlook must be installed and configured for Outlook actions.
 
-The account is saved in private device configuration. Later starts and reclones can omit `-TeamsAccount`. Setup also installs the checksum-verified Windows Actions Runtime executable in `~/.local/bin`.
+Bootstrap reuses the privately saved Teams account, or detects your signed-in Windows work account on a fresh device. Use `-TeamsAccount your.name@company.com` to override it or when Windows cannot provide a work-account address. Teams must still match that exact account. Setup also installs the checksum-verified Windows Actions Runtime executable in `~/.local/bin`.
 
 `-Dev` enables action auto-reload without an API key on loopback. Omit it for authenticated operation. Use `-PrepareOnly` to install prerequisites without starting, or `-SkipCodex` to skip registration. Start and stop an existing installation with `./powershell/start-office.ps1 -Dev` and `./powershell/stop-office.ps1`.
 

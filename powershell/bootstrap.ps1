@@ -10,6 +10,21 @@ $taskData = [IO.Path]::GetFullPath((Join-Path $taskRoot '.state\tasks'))
 $stateDir = Join-Path $taskRoot '.state'
 $actionServer = Join-Path $env:USERPROFILE '.local\bin\action-server.exe'
 
+if (-not $PrepareOnly -and [string]::IsNullOrWhiteSpace($TeamsAccount) -and
+    [string]::IsNullOrWhiteSpace($env:OFFICE_BRIDGE_TEAMS_ACCOUNT) -and
+    -not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'OfficeActionServer\config\settings.json'))) {
+    $detectedAccount = ''
+    try {
+        $detectedAccount = (& (Join-Path $env:SystemRoot 'System32\whoami.exe') /upn 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { $detectedAccount = '' }
+    } catch { $detectedAccount = '' }
+    if ($detectedAccount -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+        throw 'Windows could not identify your work account. Run bootstrap.ps1 -TeamsAccount your.name@company.com.'
+    }
+    $TeamsAccount = $detectedAccount
+    Write-Output 'Using the Windows work account for Teams identity verification.'
+}
+
 & (Join-Path $PSScriptRoot 'setup.ps1')
 if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Managed Python setup failed.' }
 if (-not (Test-Path -LiteralPath $actionServer)) { throw 'The official action-server.exe is missing after setup.' }

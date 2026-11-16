@@ -5,4 +5,9 @@ param(
     [string]$TeamsAccount
 )
 $ErrorActionPreference = 'Stop'
-& (Join-Path $PSScriptRoot 'powershell\bootstrap.ps1') @PSBoundParameters
+Push-Location -LiteralPath $PSScriptRoot
+try {
+    & (Join-Path $PSScriptRoot 'powershell\bootstrap.ps1') @PSBoundParameters
+} finally {
+    Pop-Location
+}
