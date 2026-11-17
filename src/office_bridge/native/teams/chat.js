@@ -1,6 +1,7 @@
 (request, renderNodes) => {
   const {phase, chatId, title, limit, name, requestId, body, bodyFormat, nodes, formatting,
-    authorName, navigationId, messageId, menuAction, expectedText, mentionDiagnostics} = request;
+    authorName, navigationId, messageId, menuAction, expectedText, mentionDiagnostics,
+    mentions, visibleBody, mention} = request;
   const avatar = document.querySelector('[data-tid="me-control-avatar-trigger"]');
   if (location.hostname !== 'teams.cloud.microsoft' || !avatar) return {state: 'identity_failed'};
   const validId = id => id === '48:notes' || /^19:[A-Za-z0-9._:-]{1,256}@(thread\.(v2|skype)|unq\.gbl\.spaces)$/.test(id || '');
@@ -58,7 +59,8 @@
     );
     return namedFile || !!uploading;
   };
-  const hasDraft = e => e.innerText.replace(/\n/g, '').length > 0 ||
+  const hasDraft = e => e.innerText.replace(/[\n\u2060]/g, '').length > 0 ||
+      !!e.querySelector('mention,[itemtype="http://schema.skype.com/Mention"]') ||
       !!e.querySelector('img,video,table,iframe,object,a') || e.querySelectorAll('p').length > 1 ||
       e.querySelectorAll('br').length > 1 || pendingComposerFiles(e);
   const visible = element => element.getClientRects().length > 0 &&
@@ -79,7 +81,7 @@
     const currentReady = !!header || editors.length > 0 || newChatControl();
     return !anotherAppSelected(tab) && railReady && currentReady;
   };
-  const normalizeText = value => (value || '').replace(/\s+/g, ' ').trim();
+  const normalizeText = value => (value || '').replace(/\u2060/g, '').replace(/\s+/g, ' ').trim();
   const formatKeys = ['bold', 'italic', 'code', 'links', 'unordered_list', 'ordered_list'];
   const emptyFormatting = formatting => {
     if (!formatting || typeof formatting !== 'object' ||
@@ -159,6 +161,72 @@
   const renderedMatches = (root, canonicalBody, formatting) =>
       normalizeText(root.innerText || root.textContent) === normalizeText(canonicalBody) &&
       matchingFormatting(root, formatting);
+  const mentionIdentityAttributes = element => {
+    const names = /email|mail|upn|principal|mri|itemid|recipient|user|object|identity|entity|contact|member|person|account/i;
+    const values = new Set();
+    const elements = [element, ...Array.from(element.querySelectorAll('*'))];
+    for (const node of elements) {
+      // Teams puts the picker's organizational MRI in the option DOM ID.
+      // Bind that exact UUID on the same option whose address was verified.
+      const domId = (node.getAttribute('id') || '').replace(/%3a/ig, ':');
+      const pickerMri = domId.match(/(?:^|[^A-Za-z0-9])(8:orgid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=$|[^0-9a-f])/i);
+      if (pickerMri) values.add(pickerMri[1].toLowerCase());
+      for (const attribute of Array.from(node.attributes || [])) {
+        const value = attribute.value.trim();
+        // Bind a person through an explicit address or stable organizational MRI.
+        // Generic user labels and unrelated attribute values cannot establish identity.
+        if (names.test(attribute.name) &&
+            (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value) ||
+             /^8:orgid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)))
+          values.add(value.toLowerCase());
+      }
+    }
+    return Array.from(values).sort();
+  };
+  const mentionTextLabel = (element, email) => normalizeText(
+    (element.getAttribute('aria-label') || element.innerText || element.textContent || '')
+      .replace(new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), '')
+      .replace(/^[\s,·•|()-]+|[\s,·•|()-]+$/g, '')
+  );
+  const mentionCandidateMatches = (email, label) => {
+    const options = Array.from(document.querySelectorAll('[role="option"]')).filter(visible);
+    const matched = options.filter(option => {
+      const identity = mentionIdentityAttributes(option);
+      const text = normalizeText(option.getAttribute('aria-label') || option.innerText || option.textContent || '');
+      const emailInText = new RegExp(
+        '(^|[^A-Za-z0-9._%+-])' + email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+        '($|[^A-Za-z0-9._%+-])', 'i'
+      ).test(text);
+      return identity.some(value => value.toLowerCase() === email.toLowerCase()) || emailInText;
+    }).filter(option => {
+      const optionLabel = mentionTextLabel(option, email);
+      return !label || optionLabel === normalizeText(label);
+    });
+    return matched.map(option => ({
+      option,
+      label: mentionTextLabel(option, email),
+      identity: mentionIdentityAttributes(option)
+    }));
+  };
+  const mentionEntities = root => Array.from(root.querySelectorAll('*')).filter(element => {
+    const tag = element.tagName.toLowerCase();
+    const itemtype = element.getAttribute('itemtype') || '';
+    const tid = element.getAttribute('data-tid') || '';
+    if (tag === 'mention')
+      return !element.parentElement?.closest('[itemtype="http://schema.skype.com/Mention"]');
+    if (/\/Mention$/i.test(itemtype))
+      return !element.parentElement?.closest('[itemtype="http://schema.skype.com/Mention"]');
+    return /mention/i.test(tid) && element.getAttribute('contenteditable') === 'false' &&
+      !element.closest('[itemtype="http://schema.skype.com/Mention"]');
+  });
+  const mentionEntityMatches = (entity, expected) => {
+    const text = normalizeText(entity.innerText || entity.textContent || '');
+    if (text !== normalizeText(expected.label)) return false;
+    const identity = mentionIdentityAttributes(entity);
+    const direct = identity.some(value => value.toLowerCase() === expected.email.toLowerCase());
+    const shared = identity.some(value => expected.identity.includes(value));
+    return direct || shared;
+  };
   const uploadInputs = () => Array.from(document.querySelectorAll('input[type="file"]'));
   const attachControls = root => Array.from(
     (root || document).querySelectorAll('button,[role="button"]')
@@ -188,7 +256,8 @@
     return !pending && buttons.length === 1 && !buttons[0].disabled &&
       buttons[0].getAttribute('aria-disabled') !== 'true';
   };
-  const hasDraftText = editor => editor.innerText.replace(/\n/g, '').length > 0 ||
+  const hasDraftText = editor => editor.innerText.replace(/[\n\u2060]/g, '').length > 0 ||
+      !!editor.querySelector('mention,[itemtype="http://schema.skype.com/Mention"]') ||
       !!editor.querySelector('img,video,table,iframe,object,a') || editor.querySelectorAll('p').length > 1 ||
       editor.querySelectorAll('br').length > 1;
   if (phase === 'validate_payload')
@@ -265,6 +334,352 @@
     };
     return {state: 'snapshot', fingerprint: JSON.stringify(signature),
       editor_count: editors.length, dirty: editors.some(hasDraft)};
+  }
+  if (phase === 'mention_probe_draft_status') {
+    return {state: 'draft_exists', exact_chat: headerMatches(), editor_count: editors.length,
+      query_matches: editors.length === 1 && typeof mention?.recipient_email === 'string' &&
+        normalizeText(editors[0].innerText).toLowerCase() ===
+          ('@' + mention.recipient_email).toLowerCase(),
+      text_length: editors.length === 1 ? normalizeText(editors[0].innerText).length : 0,
+      paragraphs: editors.length === 1 ? editors[0].querySelectorAll('p').length : 0,
+      breaks: editors.length === 1 ? editors[0].querySelectorAll('br').length : 0,
+      address_only: editors.length === 1 &&
+        normalizeText(editors[0].innerText).toLowerCase() === mention?.recipient_email?.toLowerCase(),
+      query_repeated: editors.length === 1 && typeof mention?.recipient_email === 'string' &&
+        normalizeText(editors[0].innerText).toLowerCase() ===
+          ('@' + mention.recipient_email + '@' + mention.recipient_email).toLowerCase(),
+      entity_count: editors.length === 1 ? mentionEntities(editors[0]).length : 0,
+      editor_text: editors.length === 1 ? normalizeText(editors[0].innerText).slice(0, 250) : '',
+      entities: editors.length === 1 ? mentionEntities(editors[0]).map(entity => ({
+        tag: entity.tagName.toLowerCase(),
+        label: normalizeText(entity.innerText || entity.textContent).slice(0, 120),
+        attributes: Array.from(entity.attributes).map(attribute => attribute.name),
+        identities: mentionIdentityAttributes(entity)
+      })) : []};
+  }
+  if (phase === 'mention_probe_recover') {
+    const entities = editors.length === 1 ? mentionEntities(editors[0]) : [];
+    if (!headerMatches() || editors.length !== 1 || entities.length !== 1 ||
+        typeof request.expectedProbeText !== 'string' ||
+        normalizeText(editors[0].innerText) !== normalizeText(request.expectedProbeText) ||
+        typeof request.expectedProbeMri !== 'string' ||
+        !/^8:orgid:[0-9a-f-]{36}$/i.test(request.expectedProbeMri) ||
+        !mentionIdentityAttributes(entities[0]).includes(request.expectedProbeMri.toLowerCase()) ||
+        pendingComposerFiles(editors[0]) ||
+        editors[0].querySelector('img,video,table,iframe,object,a'))
+      return {state: 'probe_recovery_changed'};
+    const label = normalizeText(entities[0].innerText || entities[0].textContent);
+    if (normalizeText(editors[0].innerText) !== label)
+      return {state: 'probe_recovery_changed'};
+    window.__officeMentionProbe = {
+      recipient: mention.recipient_email.toLowerCase(), editor: editors[0], before: '',
+      selected: {email: mention.recipient_email.toLowerCase(), label,
+        identity: [request.expectedProbeMri.toLowerCase()]},
+      entity: entities[0]
+    };
+    return {state: 'probe_recovery_prepared'};
+  }
+  if (phase === 'mention_probe_prepare') {
+    if (!headerMatches() || editors.length !== 1 || hasDraft(editors[0]) ||
+        typeof mention?.recipient_email !== 'string' ||
+        !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mention.recipient_email))
+      return {state: editors.some(hasDraft) ? 'draft_exists' : 'probe_unavailable'};
+    window.__officeMentionProbe = {
+      recipient: mention.recipient_email.toLowerCase(),
+      query: '@' + (request.queryText || mention.recipient_email),
+      editor: editors[0],
+      before: editors[0].innerHTML,
+      candidate: null,
+      selected: null
+    };
+    editors[0].focus();
+    return {state: document.activeElement === editors[0] ? 'probe_prepared' : 'probe_unavailable'};
+  }
+  if (phase === 'mention_probe_focus') {
+    const probe = window.__officeMentionProbe;
+    if (!probe || editors.length !== 1 || editors[0] !== probe.editor ||
+        !headerMatches() || hasDraft(editors[0]))
+      return {state: 'probe_changed'};
+    editors[0].focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editors[0]);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return {state: document.activeElement === editors[0] ? 'probe_focused' : 'probe_unavailable'};
+  }
+  if (phase === 'mention_probe_options') {
+    const probe = window.__officeMentionProbe;
+    if (!probe || editors.length !== 1 || editors[0] !== probe.editor ||
+        !headerMatches())
+      return {state: 'probe_changed'};
+    if (!editors[0].innerText.trim())
+      return {state: 'waiting', text_length: 0, editor_focused: document.activeElement === editors[0]};
+    const dialogs = Array.from(document.querySelectorAll('[role="dialog"],[role="alertdialog"]'))
+      .filter(visible);
+    if (dialogs.some(dialog => /\b(join|add|invite)\b.{0,35}\b(chat|conversation|people)\b/i
+      .test(normalizeText(dialog.innerText || dialog.textContent))))
+      return {state: 'membership_prompt'};
+    const matches = mentionCandidateMatches(probe.recipient, '');
+    const options = Array.from(document.querySelectorAll('[role="option"]')).filter(visible);
+    const contactShare = option => /^share someone.s contact info$/i.test(
+      normalizeText(option.innerText || option.textContent));
+    if (options.length && options.every(contactShare))
+      return {state: 'no_person_candidates', option_count: options.length,
+        option_kind: 'contact_share'};
+    if (matches.length !== 1)
+      return options.length ? {state: 'identity_unverified', option_count: options.length,
+        options: options.slice(0, 10).map(option => ({
+          option_kind: contactShare(option) ? 'contact_share' : 'unclassified',
+          text_length: normalizeText(option.innerText || option.textContent).length,
+          schema_types: Array.from(new Set([option, ...option.querySelectorAll('[itemtype]')]
+            .map(node => node.getAttribute('itemtype'))
+            .filter(value => /^https?:\/\/(?:schema\.skype\.com|schema\.org)\/(?:Person|Contact|Mention|Organization)$/i.test(value || '')))),
+          ids_contain_mri: [option, ...option.querySelectorAll('[id]')]
+            .some(node => /8(?::|%3a)orgid(?::|%3a)[0-9a-f-]{36}/i.test(node.id)),
+          label_matches_account: normalizeText(option.innerText || option.textContent) ===
+            normalizeText(request.accountLabel || ''),
+          aria_label_matches_account: normalizeText(option.getAttribute('aria-label')) ===
+            normalizeText(request.accountLabel || ''),
+          attribute_names: Array.from(new Set([option, ...option.querySelectorAll('*')]
+            .flatMap(node => Array.from(node.attributes).map(attribute => attribute.name)))).sort(),
+          identity_count: mentionIdentityAttributes(option).length
+        }))} :
+        {state: 'waiting', text_length: normalizeText(editors[0].innerText).length,
+          editor_focused: document.activeElement === editors[0],
+          surfaces: Array.from(document.querySelectorAll(
+            '[role="listbox"],[role="menu"],[data-tid*="mention"],[data-tid*="suggestion"]'))
+            .filter(visible).slice(0, 30).map(node => ({
+              tag: node.tagName.toLowerCase(),
+              role: node.getAttribute('role') || '',
+              tid: (node.getAttribute('data-tid') || '').replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/ig, '[id]'),
+              children: Array.from(node.querySelectorAll('[role],[data-tid]')).slice(0, 30)
+                .map(child => ({
+                  tag: child.tagName.toLowerCase(), role: child.getAttribute('role') || '',
+                  tid: (child.getAttribute('data-tid') || '').replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/ig, '[id]'),
+                  attributes: Array.from(child.attributes).map(attribute => attribute.name),
+                  email_visible: normalizeText(child.innerText || child.textContent)
+                    .toLowerCase().includes(probe.recipient)
+                }))
+            }))};
+    const candidate = matches[0];
+    if (!candidate.label)
+      return {state: 'identity_unverified', option_count: options.length};
+    probe.candidate = candidate;
+    return {
+      state: 'candidate_verified',
+      display_label: candidate.label,
+      option_count: options.length,
+      identity_attribute_count: candidate.identity.length
+    };
+  }
+  if (phase === 'mention_probe_select') {
+    const probe = window.__officeMentionProbe;
+    if (!probe || !probe.candidate || !headerMatches() || editors.length !== 1 ||
+        editors[0] !== probe.editor)
+      return {state: 'probe_changed', phase, probe_exists: !!probe,
+        header_matches: headerMatches(), editor_count: editors.length,
+        editor_same: editors[0] === probe?.editor};
+    const matches = mentionCandidateMatches(probe.recipient, probe.candidate.label);
+    if (matches.length !== 1 || matches[0].option !== probe.candidate.option ||
+        JSON.stringify(matches[0].identity) !== JSON.stringify(probe.candidate.identity))
+      return {state: 'candidate_changed'};
+    const option = matches[0].option;
+    if (option.getAttribute('aria-disabled') === 'true' || option.disabled)
+      return {state: 'candidate_disabled'};
+    option.click();
+    probe.selected = {
+      email: probe.recipient,
+      label: probe.candidate.label,
+      identity: probe.candidate.identity
+    };
+    return {state: 'candidate_selected'};
+  }
+  if (phase === 'mention_probe_chip') {
+    const probe = window.__officeMentionProbe;
+    if (!probe || !probe.selected || editors.length !== 1 ||
+        editors[0] !== probe.editor || !headerMatches())
+      return {state: 'probe_changed', phase, probe_exists: !!probe,
+        header_matches: headerMatches(), editor_count: editors.length,
+        editor_same: editors[0] === probe?.editor};
+    const matching = mentionEntities(editors[0])
+      .filter(entity => mentionEntityMatches(entity, probe.selected));
+    if (matching.length !== 1) return {state: 'chip_unverified',
+      entity_count: mentionEntities(editors[0]).length,
+      entities: mentionEntities(editors[0]).map(entity => ({
+        label: normalizeText(entity.innerText || entity.textContent || ''),
+        attributes: Array.from(entity.attributes).map(attribute => attribute.name),
+        identity_count: mentionIdentityAttributes(entity).length
+      }))};
+    const entity = matching[0];
+    const attributeNames = Array.from(entity.attributes || [])
+      .map(attribute => attribute.name)
+      .filter(name => /email|mail|upn|principal|mri|itemid|recipient|user|object|identity|entity|contact|member|person|account/i.test(name))
+      .sort();
+    probe.entity = entity;
+    return {
+      state: 'chip_verified',
+      display_label: probe.selected.label,
+      identity_evidence: 'picker_identity_matches_chip',
+      identity_attribute_names: attributeNames
+    };
+  }
+  if (phase === 'mention_probe_clear') {
+    const probe = window.__officeMentionProbe;
+    if (!probe || editors.length !== 1 || editors[0] !== probe.editor || !headerMatches())
+      return {state: 'probe_changed'};
+    if (probe.selected) {
+      const entities = mentionEntities(editors[0]);
+      if (entities.length !== 1 ||
+          (probe.entity && !mentionEntityMatches(probe.entity, probe.selected)) ||
+          (!probe.entity && normalizeText(entities[0].innerText || entities[0].textContent || '') !==
+            normalizeText(probe.selected.label)) ||
+          normalizeText(editors[0].innerText || '') !== normalizeText(probe.selected.label))
+        return {state: 'probe_changed'};
+    } else if (editors[0].innerHTML === probe.before) {
+      delete window.__officeMentionProbe;
+      return {state: 'composer_restored'};
+    } else if (normalizeText(editors[0].innerText || '') !== probe.query ||
+        mentionEntities(editors[0]).length)
+      return {state: 'probe_changed'};
+    probe.editor.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(probe.editor);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return {state: document.activeElement === probe.editor ? 'probe_clear_ready' : 'probe_changed'};
+  }
+  if (phase === 'mention_probe_cleared') {
+    const probe = window.__officeMentionProbe;
+    if (!probe || editors.length !== 1 || editors[0] !== probe.editor || !headerMatches())
+      return {state: 'probe_changed'};
+    if (normalizeText(probe.editor.innerText) || mentionEntities(probe.editor).length)
+      return {state: 'composer_not_restored'};
+    delete window.__officeMentionProbe;
+    return {state: 'composer_restored'};
+  }
+  if (phase === 'send_track_text') {
+    const operation = window.__officeRequest;
+    if (!operation || operation.id !== requestId || operation.clicked ||
+        typeof request.trackText !== 'string' || editors.length !== 1 ||
+        !headerMatches() ||
+        normalizeText(editors[0].innerText || '') !== normalizeText(operation.expectedDraft))
+      return {state: 'draft_changed'};
+    operation.expectedDraft += request.trackText;
+    editors[0].focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editors[0]);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return {state: 'track_ready'};
+  }
+  if (phase === 'mention_candidate') {
+    const operation = window.__officeRequest;
+    if (!operation || operation.id !== requestId || operation.clicked ||
+        !mention || typeof mention.key !== 'string' ||
+        typeof mention.recipient_email !== 'string' ||
+        typeof mention.display_label !== 'string' || editors.length !== 1 ||
+        !headerMatches() ||
+        normalizeText(editors[0].innerText || '') !== normalizeText(operation.expectedDraft))
+      return {state: 'draft_changed'};
+    const dialogs = Array.from(document.querySelectorAll('[role="dialog"],[role="alertdialog"]'))
+      .filter(visible);
+    if (dialogs.some(dialog => /\b(join|add|invite)\b.{0,35}\b(chat|conversation|people)\b/i
+      .test(normalizeText(dialog.innerText || dialog.textContent))))
+      return {state: 'membership_prompt'};
+    const matches = mentionCandidateMatches(mention.recipient_email, mention.display_label);
+    const options = Array.from(document.querySelectorAll('[role="option"]')).filter(visible);
+    if (!matches.length)
+      return options.length ? {state: 'identity_unverified'} : {state: 'waiting'};
+    if (matches.length !== 1) return {state: 'identity_ambiguous'};
+    const query = '@' + (mention.query_text || mention.recipient_email);
+    if (!operation.expectedDraft.toLowerCase().endsWith(query.toLowerCase()))
+      return {state: 'draft_changed'};
+    operation.candidate = {
+      key: mention.key,
+      email: mention.recipient_email.toLowerCase(),
+      label: mention.display_label,
+      identity: matches[0].identity,
+      option: matches[0].option,
+      query,
+      prefix: operation.expectedDraft.slice(0, operation.expectedDraft.length - query.length)
+    };
+    return {state: 'candidate_verified'};
+  }
+  if (phase === 'mention_select') {
+    const operation = window.__officeRequest;
+    const candidate = operation?.candidate;
+    if (!operation || operation.id !== requestId || operation.clicked || !candidate ||
+        !mention || candidate.key !== mention.key || editors.length !== 1 ||
+        !headerMatches() ||
+        normalizeText(editors[0].innerText || '') !==
+          normalizeText(candidate.prefix + candidate.query))
+      return {state: 'draft_changed'};
+    const matches = mentionCandidateMatches(candidate.email, candidate.label);
+    if (matches.length !== 1 || matches[0].option !== candidate.option ||
+        JSON.stringify(matches[0].identity) !== JSON.stringify(candidate.identity))
+      return {state: 'candidate_changed'};
+    const option = matches[0].option;
+    if (option.getAttribute('aria-disabled') === 'true' || option.disabled)
+      return {state: 'candidate_disabled'};
+    option.click();
+    operation.selected = candidate;
+    return {state: 'candidate_selected'};
+  }
+  if (phase === 'mention_chip') {
+    const operation = window.__officeRequest;
+    const selected = operation?.selected;
+    if (!operation || operation.id !== requestId || operation.clicked || !selected ||
+        editors.length !== 1 || !headerMatches())
+      return {state: 'draft_changed'};
+    const matches = mentionEntities(editors[0])
+      .filter(entity => mentionEntityMatches(entity, selected));
+    if (!matches.length) return {state: 'waiting'};
+    if (matches.length !== 1) return {state: 'chip_ambiguous'};
+    operation.expectedDraft = selected.prefix + selected.label;
+    if (normalizeText(editors[0].innerText || '') !== normalizeText(operation.expectedDraft))
+      return {state: 'chip_label_mismatch'};
+    operation.verifiedMentions = Array.isArray(operation.verifiedMentions)
+      ? operation.verifiedMentions : [];
+    operation.verifiedMentions.push({
+      key: selected.key, email: selected.email, label: selected.label,
+      identity: mentionIdentityAttributes(matches[0])
+    });
+    delete operation.candidate;
+    delete operation.selected;
+    return {state: 'mention_chip_verified'};
+  }
+  if (phase === 'send_abort_cleanup') {
+    const operation = window.__officeRequest;
+    if (!operation || operation.id !== requestId || operation.clicked ||
+        editors.length !== 1 || !headerMatches() ||
+        pendingComposerFiles(editors[0]) ||
+        editors[0].querySelector('img,video,table,iframe,object,a') ||
+        normalizeText(editors[0].innerText || '') !== normalizeText(operation.expectedDraft))
+      return {state: 'composer_not_restored'};
+    const entities = mentionEntities(editors[0]);
+    const verified = operation.verifiedMentions || [];
+    if (entities.length !== verified.length ||
+        verified.some(item => entities.filter(entity =>
+          mentionEntityMatches(entity, item)).length !== 1))
+      return {state: 'composer_not_restored'};
+    editors[0].focus();
+    return {state: document.activeElement === editors[0]
+      ? 'composer_clear_ready' : 'composer_not_restored'};
+  }
+  if (phase === 'send_abort_cleared') {
+    const operation = window.__officeRequest;
+    if (!operation || operation.id !== requestId || operation.clicked ||
+        editors.length !== 1 || !headerMatches() ||
+        normalizeText(editors[0].innerText) || mentionEntities(editors[0]).length ||
+        pendingComposerFiles(editors[0]))
+      return {state: 'composer_not_restored'};
+    delete window.__officeRequest;
+    return {state: 'composer_restored'};
   }
   if (phase === 'locate')
     return headerMatches() && matchingRows().length === 1 ? {state: 'ready'} : {state: 'navigate'};
@@ -1118,7 +1533,8 @@
     window.__officeRequest = {
       id: requestId,
       before: Array.from(document.querySelectorAll('[data-tid="chat-pane-message"]')).map(e => e.id),
-      clicked: false, pasted: false, bodyFormat
+      clicked: false, pasted: false, bodyFormat, expectedDraft: '',
+      verifiedMentions: []
     };
     editors[0].focus();
     return {state: document.activeElement === editors[0] ? 'prepared' : 'failed'};
@@ -1147,9 +1563,27 @@
   }
   if (phase === 'send') {
     const prepared = validatedFragment();
-    if (!prepared || editors.length !== 1 || !renderedMatches(editors[0], body, formatting) ||
+    const verifiedMentions = window.__officeRequest?.verifiedMentions || [];
+    const currentMentions = editors.length === 1 ? mentionEntities(editors[0]) : [];
+    if (!prepared || editors.length !== 1 ||
+        pendingComposerFiles(editors[0]) ||
+        !renderedMatches(editors[0], visibleBody || body, formatting) ||
         window.__officeRequest?.id !== requestId || window.__officeRequest.clicked !== false ||
         !Array.isArray(window.__officeRequest.before) ||
+        (Array.isArray(mentions) && mentions.length > 0 &&
+          (normalizeText(window.__officeRequest.expectedDraft || '') !==
+            normalizeText(visibleBody || body) ||
+           currentMentions.length !== verifiedMentions.length ||
+           verifiedMentions.some((expected, index) =>
+             !currentMentions[index] || !mentionEntityMatches(currentMentions[index], expected)))) ||
+        (Array.isArray(mentions) &&
+          (mentions.length !== (window.__officeRequest.verifiedMentions || []).length ||
+           mentions.some((item, index) => {
+             const verified = window.__officeRequest.verifiedMentions[index];
+             return !verified || verified.key !== item.key ||
+               verified.email.toLowerCase() !== item.recipient_email.toLowerCase() ||
+               verified.label !== item.display_label;
+           }))) ||
         (bodyFormat === 'markdown' && window.__officeRequest.pasted !== true)) return {state: 'failed'};
     const buttons = Array.from(document.querySelectorAll(
         'button[data-tid="newMessageCommands-send"],button[data-tid="sendMessageCommands-send"]'))
@@ -1164,7 +1598,7 @@
       return {state: 'failed'};
     const matches = Array.from(document.querySelectorAll('[data-tid="chat-pane-message"]'))
         .filter(e => !window.__officeRequest.before.includes(e.id) &&
-            renderedMatches(e, body, formatting) &&
+            renderedMatches(e, visibleBody || body, formatting) &&
             /^message-body-[0-9]{13}$/.test(e.id));
     if (matches.length !== 1) return {state: 'waiting'};
     const e = matches[0], mid = e.id.slice('message-body-'.length);
@@ -1174,8 +1608,41 @@
       const author = p.querySelector('[data-tid="message-author-name"]');
       const stamp = p.querySelector('time');
       if (author && stamp && author.textContent.trim() === authorName &&
-          Date.parse(stamp.getAttribute('datetime')) === Number(mid))
-        return {state: 'observed', message_id: e.id, time: stamp.getAttribute('datetime'), chat_id: chatId, title};
+          Date.parse(stamp.getAttribute('datetime')) === Number(mid)) {
+        const observed = {
+          state: 'observed', message_id: e.id, time: stamp.getAttribute('datetime'),
+          chat_id: chatId, title
+        };
+        if (Array.isArray(mentions) && mentions.length) {
+          const settled = mentionEntities(e);
+          const receipts = [];
+          for (const [index, expected] of (window.__officeRequest.verifiedMentions || []).entries()) {
+            // Posted Teams entities replace the MRI with a message-local ordinal.
+            // Tie that ordinal and label to the exact MRI-verified insertion plan
+            // retained across the one click, in this new own settled message.
+            const matchesPosition = entity => entity === settled[index] &&
+              entity.getAttribute('itemtype') === 'http://schema.skype.com/Mention' &&
+              entity.getAttribute('data-mention-type') === 'person' &&
+              entity.getAttribute('itemid') === String(index) &&
+              normalizeText(entity.innerText || entity.textContent) === normalizeText(expected.label);
+            const candidates = settled.filter(entity =>
+              mentionEntityMatches(entity, expected) || matchesPosition(entity));
+            if (candidates.length !== 1) return {state: 'waiting'};
+            receipts.push({
+              key: expected.key,
+              text: expected.label,
+              recipient_email: expected.email,
+              identity_evidence: mentionEntityMatches(candidates[0], expected)
+                ? 'picker_identity_matches_settled_entity'
+                : 'verified_picker_chip_and_settled_ordinal',
+              entity_verified: true
+            });
+          }
+          if (settled.length !== receipts.length) return {state: 'waiting'};
+          observed.mentions = receipts;
+        }
+        return observed;
+      }
     }
     return {state: 'waiting'};
   }

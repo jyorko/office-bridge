@@ -108,6 +108,54 @@ def test_composed_text_limit_is_checked_before_capability_or_reservation(tmp_pat
     assert not (tmp_path / "OfficeActionServer" / "teams-web-sends" / "group.sqlite3").exists()
 
 
+def test_markdown_mentions_rejected_before_host_check_and_reservation(tmp_path, monkeypatch):
+    calls = []
+
+    def invoke(operation, _arguments):
+        calls.append(operation)
+        pytest.fail("unsupported mention format must fail before host checks")
+
+    setup_send(tmp_path, monkeypatch, invoke)
+    with pytest.raises(ActionError, match="plain-text body"):
+        actions.teams_web_send_chat(
+            CHAT,
+            "Hi {{mention:person}}",
+            "markdown-mention",
+            body_format="markdown",
+            mentions=plan(),
+        )
+    assert calls == []
+    database = tmp_path / "OfficeActionServer" / "teams-web-sends" / "group.sqlite3"
+    assert not database.exists()
+
+
+def test_mention_plan_order_must_match_body_placeholders(tmp_path, monkeypatch):
+    calls = []
+
+    def invoke(operation, _arguments):
+        calls.append(operation)
+        pytest.fail("order mismatch must fail before host checks")
+
+    setup_send(tmp_path, monkeypatch, invoke)
+    two = PersonMentions(
+        [
+            PersonMention(
+                key="first", display_label="First", recipient={"email": "first@example.invalid"}
+            ),
+            PersonMention(
+                key="second", display_label="Second", recipient={"email": "second@example.invalid"}
+            ),
+        ]
+    )
+    with pytest.raises(ActionError, match="placeholder order"):
+        actions.teams_web_send_chat(
+            CHAT, "{{mention:second}} then {{mention:first}}", "order-mismatch", mentions=two
+        )
+    assert calls == []
+    database = tmp_path / "OfficeActionServer" / "teams-web-sends" / "group.sqlite3"
+    assert not database.exists()
+
+
 def test_unsupported_host_refuses_before_reservation_and_native_send(tmp_path, monkeypatch):
     calls = []
 
@@ -182,6 +230,7 @@ def test_mentions_bind_same_request_id_and_cached_receipt(tmp_path, monkeypatch)
             "recipient_email": "person@example.invalid",
         }
     ]
+    assert send_arguments["visible_body"] == "Hi Example Person"
     with pytest.raises(ActionError, match="conflicts"):
         actions.teams_web_send_chat(
             CHAT,

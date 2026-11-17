@@ -1,8 +1,12 @@
+# Normalize text in Git and use LF checkouts on Windows and Linux.
+# PowerShell scripts also use LF.
 * text=auto eol=lf
 
+# Windows command scripts require CRLF checkouts.
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
+# Never apply line-ending conversion to binary files.
 *.png binary
 *.jpg binary
 *.ico binary

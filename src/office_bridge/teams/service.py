@@ -319,10 +319,14 @@ def send_chat(
         raise TeamsError(str(error)) from None
     mention_keys = {mention.key for mention in mentions.root}
     try:
-        validate_mention_placeholders(body, body_format, mention_keys)
+        placeholder_order = validate_mention_placeholders(body, body_format, mention_keys)
     except BodyFormatError as error:
         raise TeamsError(str(error)) from None
     if mentions.root:
+        if placeholder_order != [mention.key for mention in mentions.root]:
+            raise TeamsError("Mention plans must follow placeholder order in the message.")
+        if body_format != "plain":
+            raise TeamsError("Person mentions currently require a plain-text body.")
         expected_body = prepared.body
         for mention in mentions.root:
             expected_body = expected_body.replace(
@@ -358,6 +362,7 @@ def send_chat(
         }
         if mentions.root:
             arguments["mentions"] = _mention_plan_identity(mentions)
+            arguments["visible_body"] = expected_body
         result = desktop.invoke("teams_web_send_chat", arguments)
         if (
             result.get("state") != "observed"

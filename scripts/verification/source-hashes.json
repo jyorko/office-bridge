@@ -2,6 +2,6 @@
   "office_bridge/teams/copilot.py": "6b67f744b951730afb38c210e85aa243d9426983c7aac4befdc2dd2de0faf617",
   "office_bridge/teams/ledger.py": "b711934f0f02743715c2db5ab2ab4a8e813d138911a27c32b922cae5a2315d4c",
   "office_bridge/teams/messages.py": "583d573dea4157c76d753a3605ca9a34049fc0cec1d807e2329b418b3de48a27",
-  "office_bridge/teams/service.py": "850d2f334a84550a51c70e03b2e47c507ecceab0b6e599b1d1daa4a080bd70bf",
+  "office_bridge/teams/service.py": "47088d4da81b734ba14cb0ef1603295ab8ea993cae64369b64b0d31f4c1ce728",
   "office_bridge/teams/work_tracking.py": "9875056735793e568d26e7464db937c45b7d82afa5a7a6b437017875fcf28382"
 }
