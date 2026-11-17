@@ -110,6 +110,278 @@ def test_message_reactions_and_links_are_bound_to_exact_message(page):
     assert page.evaluate("window.reactions") == 1
 
 
+def test_mention_evidence_is_structural_and_does_not_return_identity_values(page):
+    message_id = "message-body-1700000000001"
+    page.evaluate(
+        """id=>{
+          const message=document.createElement('div');
+          message.id=id;message.dataset.tid='chat-pane-message';
+          message.innerHTML='<p>Private Display Name '
+            +'<readonly itemtype="http://schema.skype.com/Mention" data-tid="private-wrapper-id">'
+            +'<mention mri="private-recipient-id" data-email="private@example.invalid" '
+            +'role="Private Display Name" aria-label="Private Display Name">'
+            +'Private Display Name</mention></readonly></p>';
+          document.body.append(message);
+        }""",
+        message_id,
+    )
+    result = run(page, "inspect_message", message_id=message_id, mention_diagnostics=True)
+    assert result["state"] == "inspected"
+    assert len(result["mentions"]) == 2
+    assert result["capture_date"]
+    encoded = str(result)
+    for private_value in (
+        "Private Display Name",
+        "private-recipient-id",
+        "private@example.invalid",
+        "private-wrapper-id",
+        message_id,
+    ):
+        assert private_value not in encoded
+    mention = next(item for item in result["mentions"] if item["tag"] == "mention")
+    assert {"mri", "data-email", "aria-label"} <= set(mention["attribute_names"])
+    assert mention["role"] == ""
+    assert mention["role_shape"]["length"] == len("Private Display Name")
+    assert mention["data_tid_shape"]["length"] == 0
+    assert all("value_shape" in attribute for attribute in mention["attributes"])
+
+
+def test_mention_picker_probe_requires_exact_email_and_restores_composer(page):
+    email = "person@example.invalid"
+    label = "Example Person"
+    editor = page.locator('[data-tid="ckeditor"]')
+    assert (
+        run(page, "mention_probe_prepare", mention={"recipient_email": email})["state"]
+        == "probe_prepared"
+    )
+    editor.fill("@" + email)
+    page.evaluate(
+        """([email,label]) => {
+          const option=document.createElement('div');
+          option.setAttribute('role','option');
+          option.setAttribute('data-email',email);
+          option.id='mention-option-8:orgid:11111111-1111-1111-1111-111111111111';
+          option.textContent=label+' '+email;
+          option.addEventListener('click',()=>{
+            const editor=document.querySelector('[data-tid="ckeditor"]');
+            editor.innerHTML='<readonly itemtype="http://schema.skype.com/Mention">'
+              +label.split(' ').map(word=>
+                '<mention mri="8:orgid:11111111-1111-1111-1111-111111111111">'+word+'</mention>').join(' ')
+              +'</readonly>\\u2060\\u2060';
+          });
+          document.body.append(option);
+        }""",
+        [email, label],
+    )
+    candidate = run(page, "mention_probe_options", mention={"recipient_email": email})
+    assert candidate["state"] == "candidate_verified"
+    assert candidate["display_label"] == label
+    assert (
+        run(page, "mention_probe_select", mention={"recipient_email": email})["state"]
+        == "candidate_selected"
+    )
+    chip = run(page, "mention_probe_chip", mention={"recipient_email": email})
+    assert chip["state"] == "chip_verified"
+    assert chip["identity_evidence"] == "picker_identity_matches_chip"
+    assert run(page, "mention_probe_clear")["state"] == "probe_clear_ready"
+    page.keyboard.press("Backspace")
+    assert run(page, "mention_probe_cleared")["state"] == "composer_restored"
+    assert editor.inner_text().strip() == ""
+    assert page.evaluate("window.clicks || 0") == 0
+
+
+def test_mention_probe_restores_untouched_composer_after_failed_insertion(page):
+    assert (
+        run(page, "mention_probe_prepare", mention={"recipient_email": "person@example.invalid"})[
+            "state"
+        ]
+        == "probe_prepared"
+    )
+    assert run(page, "mention_probe_focus")["state"] == "probe_focused"
+    assert run(page, "mention_probe_options")["state"] == "waiting"
+    assert run(page, "mention_probe_clear")["state"] == "composer_restored"
+    assert page.evaluate("window.clicks || 0") == 0
+
+
+def test_mention_chip_shared_display_label_does_not_prove_identity(page):
+    email = "person@example.invalid"
+    assert (
+        run(page, "mention_probe_prepare", mention={"recipient_email": email})["state"]
+        == "probe_prepared"
+    )
+    page.locator('[data-tid="ckeditor"]').fill("@" + email)
+    page.evaluate(
+        """email => {
+          const option = document.createElement('div');
+          option.setAttribute('role','option');
+          option.setAttribute('data-email',email);
+          option.setAttribute('data-user','Example Person');
+          option.textContent='Example Person '+email;
+          option.onclick=()=>{
+            document.querySelector('[data-tid="ckeditor"]').innerHTML=
+              '<mention data-user="Example Person">Example Person</mention>';
+          };
+          document.body.append(option);
+        }""",
+        email,
+    )
+    assert run(page, "mention_probe_options")["state"] == "candidate_verified"
+    assert run(page, "mention_probe_select")["state"] == "candidate_selected"
+    assert run(page, "mention_probe_chip")["state"] == "chip_unverified"
+    assert page.evaluate("window.clicks || 0") == 0
+
+
+def test_failed_mention_send_clears_only_its_unchanged_owned_query(page):
+    assert run(page, "prepare", body="Test")["state"] == "prepared"
+    assert run(page, "send_track_text", track_text="@Example")["state"] == "track_ready"
+    editor = page.locator('[data-tid="ckeditor"]')
+    editor.fill("@Example")
+    assert run(page, "send_abort_cleanup")["state"] == "composer_clear_ready"
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Backspace")
+    assert run(page, "send_abort_cleared")["state"] == "composer_restored"
+    assert page.evaluate("window.clicks || 0") == 0
+
+
+def test_failed_mention_send_preserves_changed_draft(page):
+    assert run(page, "prepare", body="Test")["state"] == "prepared"
+    assert run(page, "send_track_text", track_text="@Example")["state"] == "track_ready"
+    editor = page.locator('[data-tid="ckeditor"]')
+    editor.fill("User changed this draft")
+    assert run(page, "send_abort_cleanup")["state"] == "composer_not_restored"
+    assert editor.inner_text() == "User changed this draft"
+    assert page.evaluate("window.clicks || 0") == 0
+
+
+@pytest.mark.parametrize("settled_identity", ["mri", "ordinal"])
+def test_send_selects_verified_candidate_and_observes_settled_mention(page, settled_identity):
+    email = "person@example.invalid"
+    label = "Example Person"
+    mentions = [{"key": "person", "display_label": label, "recipient_email": email}]
+    mention = mentions[0]
+    body = "Hi {{mention:person}}."
+    visible_body = "Hi Example Person."
+    assert (
+        run(page, "prepare", body=body, visible_body=visible_body, mentions=mentions)["state"]
+        == "prepared"
+    )
+    assert run(page, "send_track_text", track_text="Hi ")["state"] == "track_ready"
+    editor = page.locator('[data-tid="ckeditor"]')
+    editor.evaluate("element=>element.textContent='Hi '")
+    assert run(page, "send_track_text", track_text="@" + email)["state"] == "track_ready"
+    editor.evaluate("element=>element.textContent+='@" + email + "'")
+    page.evaluate(
+        """([email,label]) => {
+          const option=document.createElement('div');
+          option.setAttribute('role','option');
+          option.setAttribute('data-email',email);
+          option.setAttribute('data-mri','8:orgid:22222222-2222-2222-2222-222222222222');
+          option.textContent=label+' '+email;
+          option.addEventListener('click',()=>{
+            const editor=document.querySelector('[data-tid="ckeditor"]');
+            editor.innerHTML='Hi <readonly itemtype="http://schema.skype.com/Mention">'
+              +'<mention data-mri="8:orgid:22222222-2222-2222-2222-222222222222">'+label+'</mention></readonly>';
+          });
+          document.body.append(option);
+        }""",
+        [email, label],
+    )
+    assert (
+        run(
+            page,
+            "mention_candidate",
+            body=body,
+            visible_body=visible_body,
+            mentions=mentions,
+            mention=mention,
+        )["state"]
+        == "candidate_verified"
+    )
+    assert (
+        run(
+            page,
+            "mention_select",
+            body=body,
+            visible_body=visible_body,
+            mentions=mentions,
+            mention=mention,
+        )["state"]
+        == "candidate_selected"
+    )
+    assert (
+        run(
+            page,
+            "mention_chip",
+            body=body,
+            visible_body=visible_body,
+            mentions=mentions,
+            mention=mention,
+        )["state"]
+        == "mention_chip_verified"
+    )
+    assert run(page, "send_track_text", track_text=".")["state"] == "track_ready"
+    editor.evaluate("element=>element.insertAdjacentText('beforeend','.')")
+    verified_draft = editor.inner_html()
+    editor.locator("readonly").evaluate(
+        "element => element.replaceWith(document.createTextNode(element.textContent))"
+    )
+    assert (
+        run(page, "send", body=body, visible_body=visible_body, mentions=mentions)["state"]
+        == "failed"
+    )
+    assert page.evaluate("window.clicks || 0") == 0
+    editor.evaluate("(element, html) => {element.innerHTML=html}", verified_draft)
+    assert (
+        run(page, "send", body=body, visible_body=visible_body, mentions=mentions)["state"]
+        == "clicked"
+    )
+    message_id = "message-body-1700000000002"
+    page.evaluate(
+        """([id,label,identity])=>{
+          const row=document.createElement('div');
+          row.innerHTML='<span data-tid="message-author-name">Example User</span>'
+            +'<time datetime="2023-11-14T22:13:20.002Z"></time>'
+            +'<div data-tid="chat-pane-message" id="'+id+'" data-mid="1700000000002">'
+            +'Hi '+(identity==='mri' ?
+              '<readonly itemtype="http://schema.skype.com/Mention">'
+              +'<mention data-mri="8:orgid:22222222-2222-2222-2222-222222222222">'+label+'</mention></readonly>' :
+              '<span itemtype="http://schema.skype.com/Mention" data-mention-type="person" itemid="0">'+label+'</span>')
+            +'.</div>';
+          document.body.append(row);
+        }""",
+        [message_id, label, settled_identity],
+    )
+    result = run(page, "observe", body=body, visible_body=visible_body, mentions=mentions)
+    assert result["state"] == "observed"
+    assert result["message_id"] == message_id
+    assert result["mentions"] == [
+        {
+            "key": "person",
+            "text": label,
+            "recipient_email": email,
+            "identity_evidence": (
+                "picker_identity_matches_settled_entity"
+                if settled_identity == "mri"
+                else "verified_picker_chip_and_settled_ordinal"
+            ),
+            "entity_verified": True,
+        }
+    ]
+    assert page.evaluate("window.clicks") == 1
+    if settled_identity == "ordinal":
+        entity = page.locator(f"#{message_id} [itemtype]")
+        entity.evaluate("element => element.setAttribute('itemid','1')")
+        assert (
+            run(page, "observe", body=body, visible_body=visible_body, mentions=mentions)["state"]
+            == "waiting"
+        )
+        entity.evaluate("element => element.removeAttribute('itemtype')")
+        assert (
+            run(page, "observe", body=body, visible_body=visible_body, mentions=mentions)["state"]
+            == "waiting"
+        )
+
+
 def test_toolbar_reaction_checks_content_after_reaction_summary_changes(page):
     message_id = "message-body-1700000000000"
     page.evaluate(
@@ -330,33 +602,48 @@ def run(
     menu_action="",
     expected_text=None,
     limit=20,
+    mention_diagnostics=False,
+    mentions=None,
+    visible_body=None,
+    mention=None,
+    track_text=None,
 ):
     if body_format == "markdown" and nodes is None and html is None:
         prepared = format_body(body, body_format)
         html, formatting, nodes = prepared.html, prepared.formatting, prepared.nodes
+    request = {
+        "phase": phase,
+        "body": body,
+        "bodyFormat": body_format,
+        "html": html,
+        "nodes": nodes,
+        "formatting": formatting or EMPTY_FORMATTING,
+        "chatId": chat_id,
+        "title": title,
+        "limit": limit,
+        "requestId": "test-id",
+        "authorName": "Example User",
+        "navigationId": "test-id",
+        "messageId": message_id,
+        "menuAction": menu_action,
+        "expectedText": expected_text,
+        "mentionDiagnostics": mention_diagnostics,
+    }
+    if mentions is not None:
+        request["mentions"] = mentions
+    if visible_body is not None:
+        request["visibleBody"] = visible_body
+    if mention is not None:
+        request["mention"] = mention
+    if track_text is not None:
+        request["trackText"] = track_text
     return page.evaluate(
         "([source,renderer,request]) => { const render=(0,eval)('('+renderer+')'); "
         "return (0,eval)('('+source+')')(request,render); }",
         [
             SCRIPT,
             RENDER_NODES,
-            {
-                "phase": phase,
-                "body": body,
-                "bodyFormat": body_format,
-                "html": html,
-                "nodes": nodes,
-                "formatting": formatting or EMPTY_FORMATTING,
-                "chatId": chat_id,
-                "title": title,
-                "limit": limit,
-                "requestId": "test-id",
-                "authorName": "Example User",
-                "navigationId": "test-id",
-                "messageId": message_id,
-                "menuAction": menu_action,
-                "expectedText": expected_text,
-            },
+            request,
         ],
     )
 

@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import types
@@ -400,6 +401,200 @@ def check_edit_reservation() -> int:
     return 1
 
 
+def check_group_send_reservation() -> int:
+    from office_bridge.teams import service
+    from office_bridge.teams.models import PersonMention, PersonMentions, WebChatRef
+    from office_bridge.teams.service import TeamsError
+
+    chat = WebChatRef(chat_id=CHAT_ID, title=CHAT_TITLE)
+    calls: list[str] = []
+    events: list[str] = []
+    plan = PersonMentions(
+        [
+            PersonMention(
+                key="person",
+                display_label="Fixture Person",
+                recipient={"email": "person@example.invalid"},
+            )
+        ]
+    )
+    response = {
+        "state": "observed",
+        "message_id": MESSAGE_ID,
+        "time": "2026-11-17T12:00:00Z",
+        "chat_id": CHAT_ID,
+        "title": CHAT_TITLE,
+        "mentions": [
+            {
+                "key": "person",
+                "text": "Fixture Person",
+                "recipient_email": "person@example.invalid",
+                "identity_evidence": "candidate_email",
+                "entity_verified": True,
+            }
+        ],
+    }
+
+    with ExitStack() as stack:
+        _isolated_localapp(stack)
+        stack.enter_context(patch.object(service.ledger, "has_request_id", lambda _id: False))
+        original_reserve = service._reserve_send
+
+        def record_reservation(*args):
+            events.append("reserved")
+            return original_reserve(*args)
+
+        def invoke(operation, _arguments):
+            if operation == "teams_web_status":
+                return {
+                    "state": "authenticated",
+                    "account_verified": True,
+                    "host_visible": False,
+                    "control_visible": False,
+                    "foreground_interference": False,
+                    "restart_required": False,
+                    "capabilities": ["person_mentions_v1"],
+                }
+            calls.append(operation)
+            events.append("native")
+            raise SimulatedProcessLoss()
+
+        stack.enter_context(patch.object(service, "_reserve_send", record_reservation))
+        stack.enter_context(patch.object(service.desktop, "invoke", invoke))
+        try:
+            service.send_chat(chat, "fixture", "send-before-native")
+        except SimulatedProcessLoss:
+            pass
+        else:
+            raise AssertionError("native send did not simulate process loss")
+        assert events == ["reserved", "native"], f"reservation order changed: {events}"
+        assert calls == ["teams_web_send_chat"]
+        stack.enter_context(
+            patch.object(service.desktop, "invoke", lambda *_: calls.append("retry"))
+        )
+        try:
+            service.send_chat(chat, "fixture", "send-before-native")
+        except TeamsError:
+            pass
+        else:
+            raise AssertionError("uncertain send reservation was replayed")
+        assert calls == ["teams_web_send_chat"]
+
+    # A crash after reservation but before the native call must also remain blocked.
+    with ExitStack() as stack:
+        _isolated_localapp(stack)
+        stack.enter_context(patch.object(service.ledger, "has_request_id", lambda _id: False))
+        original_reserve = service._reserve_send
+
+        def crash_after_reserve(*args):
+            original_reserve(*args)
+            raise SimulatedProcessLoss()
+
+        native_calls: list[str] = []
+        stack.enter_context(patch.object(service, "_reserve_send", crash_after_reserve))
+        stack.enter_context(
+            patch.object(
+                service.desktop,
+                "invoke",
+                lambda operation, _arguments: native_calls.append(operation),
+            )
+        )
+        try:
+            service.send_chat(chat, "fixture", "send-reservation-only")
+        except SimulatedProcessLoss:
+            pass
+        else:
+            raise AssertionError("reservation-only crash was not simulated")
+        stack.enter_context(patch.object(service, "_reserve_send", original_reserve))
+        try:
+            service.send_chat(chat, "fixture", "send-reservation-only")
+        except TeamsError:
+            pass
+        else:
+            raise AssertionError("reservation-only send was replayed")
+        assert native_calls == []
+
+    # A native observed result is not replayable if the receipt write never happens.
+    with ExitStack() as stack:
+        _isolated_localapp(stack)
+        stack.enter_context(patch.object(service.ledger, "has_request_id", lambda _id: False))
+        observed_calls: list[str] = []
+
+        def observed_invoke(operation, _arguments):
+            observed_calls.append(operation)
+            return dict(response)
+
+        stack.enter_context(patch.object(service.desktop, "invoke", observed_invoke))
+        real_receipt = service.GroupReceipt
+
+        def crash_receipt(*_args, **_kwargs):
+            raise SimulatedProcessLoss()
+
+        stack.enter_context(patch.object(service, "GroupReceipt", crash_receipt))
+        try:
+            service.send_chat(chat, "fixture", "send-before-receipt")
+        except SimulatedProcessLoss:
+            pass
+        else:
+            raise AssertionError("post-observation receipt crash was not simulated")
+        stack.enter_context(patch.object(service, "GroupReceipt", real_receipt))
+
+        def forbidden_retry(operation, _arguments):
+            observed_calls.append(operation)
+            return dict(response)
+
+        stack.enter_context(patch.object(service.desktop, "invoke", forbidden_retry))
+        try:
+            service.send_chat(chat, "fixture", "send-before-receipt")
+        except TeamsError:
+            pass
+        else:
+            raise AssertionError("observed send without receipt was replayed")
+        assert observed_calls == ["teams_web_send_chat"]
+
+    # A changed mention plan under a settled request ID is a conflict, not a new send.
+    with ExitStack() as stack:
+        _isolated_localapp(stack)
+        stack.enter_context(patch.object(service.ledger, "has_request_id", lambda _id: False))
+        native_calls = []
+
+        def mention_invoke(operation, _arguments):
+            if operation == "teams_web_status":
+                return {
+                    "state": "authenticated",
+                    "account_verified": True,
+                    "host_visible": False,
+                    "control_visible": False,
+                    "foreground_interference": False,
+                    "restart_required": False,
+                    "capabilities": ["person_mentions_v1"],
+                }
+            native_calls.append(operation)
+            return dict(response)
+
+        stack.enter_context(patch.object(service.desktop, "invoke", mention_invoke))
+        service.send_chat(chat, "Hi {{mention:person}}", "send-plan-conflict", mentions=plan)
+        changed_plan = PersonMentions(
+            [
+                PersonMention(
+                    key="person",
+                    display_label="Other Fixture",
+                    recipient={"email": "person@example.invalid"},
+                )
+            ]
+        )
+        try:
+            service.send_chat(
+                chat, "Hi {{mention:person}}", "send-plan-conflict", mentions=changed_plan
+            )
+        except TeamsError:
+            pass
+        else:
+            raise AssertionError("changed mention plan reused an existing request ID")
+        assert native_calls == ["teams_web_send_chat"]
+    return 4
+
+
 def check_upload_reservation() -> int:
     from office_bridge.teams import service
     from office_bridge.teams.models import WebChatRef
@@ -510,6 +705,50 @@ def check_copilot_reservation() -> int:
     return 1
 
 
+def check_send_reservation_mutation() -> None:
+    reservation = (
+        "    cached = _reserve_send(path, request_id, digest, chat)\n"
+        "    if cached is not None:\n"
+        "        return cached\n"
+    )
+    native_call = '        result = desktop.invoke("teams_web_send_chat", arguments)\n'
+    with tempfile.TemporaryDirectory(prefix="office-bridge-send-mutation-") as directory:
+        scratch_root = Path(directory) / "src"
+        shutil.copytree(DEFAULT_SOURCE, scratch_root)
+        service_path = scratch_root / "office_bridge" / "teams" / "service.py"
+        source = service_path.read_text(encoding="utf-8")
+        if source.count(reservation) != 1 or source.count(native_call) != 1:
+            raise AssertionError("could not construct the send reservation mutation")
+        source = source.replace(reservation, "", 1)
+        source = source.replace(
+            native_call,
+            native_call
+            + "        cached = _reserve_send(path, request_id, digest, chat)\n"
+            + "        if cached is not None:\n"
+            + "            return cached\n",
+            1,
+        )
+        service_path.write_text(source, encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--source-root",
+                str(scratch_root),
+                "--skip-mutation-check",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 or "reservation order changed" not in result.stderr:
+            raise AssertionError(
+                "send reservation mutation was not rejected by the ordering check\n"
+                + result.stdout
+                + result.stderr
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -519,6 +758,7 @@ def main() -> int:
         help="alternate source tree, used only for scratch mutation checks",
     )
     parser.add_argument("--print-source-hashes", action="store_true")
+    parser.add_argument("--skip-mutation-check", action="store_true")
     args = parser.parse_args()
     if args.print_source_hashes:
         print(json.dumps(_record_sources(), indent=2, sort_keys=True))
@@ -535,19 +775,27 @@ def main() -> int:
     work_cases = explore_work_tracking()
     crash_checks = check_pending_crashes()
     send_checks = check_send_ledger()
+    group_send_checks = check_group_send_reservation()
     edit_checks = check_edit_reservation()
     upload_checks = check_upload_reservation()
     copilot_checks = check_copilot_reservation()
+    if args.source_root.resolve() == DEFAULT_SOURCE.resolve() and not args.skip_mutation_check:
+        check_send_reservation_mutation()
     print(
         "PASS bounded real-code exploration: "
         f"{work_cases} work-tracking paths, {crash_checks} Eyes crash checks, "
-        f"{send_checks} send-ledger checks, {edit_checks} edit-reservation check, "
+        f"{send_checks} send-ledger checks, {group_send_checks} generic send reservation checks, "
+        f"{edit_checks} edit-reservation check, "
         f"{upload_checks} upload-reservation/reconciliation checks, "
         f"{copilot_checks} Copilot-reservation check"
     )
     print("Bounds: two work claims; all 6 begin/finish orders; all three Eyes baselines.")
     print("Every reachable add result and each remove result after an owned add are explored.")
     print("Teams/native bridge behavior is stubbed; no Teams account or endpoint is contacted.")
+    if args.source_root.resolve() == DEFAULT_SOURCE.resolve() and not args.skip_mutation_check:
+        print(
+            "PASS scratch mutation: moving the generic send reservation after native invoke is rejected."
+        )
     return 0
 
 

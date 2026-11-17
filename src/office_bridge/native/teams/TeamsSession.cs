@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -188,7 +189,12 @@ public sealed class TeamsSession : ApplicationContext
     {
         string surface = Surface.Replace("__EXPECTED_ACCOUNT__", Json.Serialize(expectedAccount));
         string raw = await core.ExecuteScriptAsync(surface);
-        return Json.Deserialize<Dictionary<string, object>>(raw);
+        return Json.Deserialize<Dictionary<string, object>>(raw) ??
+            new Dictionary<string, object> {
+                { "app", false }, { "login", false }, { "blocked", false },
+                { "account_verified", false }, { "account_name", "" },
+                { "hostname", "" }, { "path", "/" }
+            };
     }
     bool HostVisible()
     {
@@ -428,6 +434,13 @@ public sealed class TeamsSession : ApplicationContext
             "(() => { if(!document.querySelector('[data-tid=me-control-menu-dialog]')) " +
             "document.querySelector('[data-tid=me-control-avatar-trigger]')?.click(); })()");
         page = await Inspect(core);
+        var profileDeadline = DateTime.UtcNow.AddSeconds(2);
+        while (!Flag(page, "account_verified") && !Flag(page, "blocked") &&
+               !Flag(page, "login") && DateTime.UtcNow < profileDeadline)
+        {
+            await Task.Delay(100);
+            page = await Inspect(core);
+        }
         bool authenticated = Flag(page, "account_verified") &&
                             !String.IsNullOrWhiteSpace(Convert.ToString(page["account_name"]));
         if (authenticated)
@@ -461,7 +474,7 @@ public sealed class TeamsSession : ApplicationContext
             throw new InvalidDataException();
         if (await AuxiliaryHasExactChat(core, chatId, title))
             return;
-        if (!chatId.StartsWith("19:", StringComparison.Ordinal))
+        if (!chatId.StartsWith("19:", StringComparison.Ordinal) && chatId != "48:notes")
             return;
 
         var snapshot = await ExecuteChat(core, new Dictionary<string, object> {
@@ -470,10 +483,13 @@ public sealed class TeamsSession : ApplicationContext
         if (Flag(snapshot, "dirty"))
             throw new InvalidOperationException("draft_exists");
 
-        string deepLink = "https://teams.microsoft.com/l/chat/" +
-                          Uri.EscapeDataString(chatId) + "/conversations";
+        string deepLink = chatId == "48:notes"
+            ? "https://teams.microsoft.com/l/chat/48%3Anotes/conversations?context=%7B%22contextType%22%3A%22chat%22%7D"
+            : "https://teams.microsoft.com/l/chat/" +
+              Uri.EscapeDataString(chatId) + "/conversations";
         core.Navigate(deepLink);
         var deadline = DateTime.UtcNow.AddSeconds(25);
+        bool rowSelected = false;
         while (DateTime.UtcNow < deadline)
         {
             if (HostVisible() || OwnedForeground())
@@ -486,10 +502,23 @@ public sealed class TeamsSession : ApplicationContext
                 throw new InvalidOperationException("identity_failed");
             if (Flag(page, "app"))
             {
-                if (!await AuxiliaryAuthenticated(core))
-                    throw new InvalidOperationException("identity_failed");
-                if (await AuxiliaryHasExactChat(core, chatId, title))
-                    return;
+                if (await AuxiliaryAuthenticated(core))
+                {
+                    if (await AuxiliaryHasExactChat(core, chatId, title))
+                        return;
+                    // Teams can open the workspace without following the deep link.
+                    // Select the exact rail ID, then verify its header independently.
+                    if (!rowSelected)
+                    {
+                        var selected = await ExecuteChat(core, new Dictionary<string, object> {
+                            { "phase", "navigate" }, { "chatId", chatId }, { "title", title }
+                        });
+                        string selectedState = Convert.ToString(selected["state"]);
+                        if (selectedState == "navigated") rowSelected = true;
+                        else if (selectedState != "waiting")
+                            throw new InvalidOperationException(selectedState);
+                    }
+                }
             }
             await Task.Delay(200);
         }
@@ -965,8 +994,31 @@ public sealed class TeamsSession : ApplicationContext
         }
         if (!context.ProtectPrimary)
             return true;
-        return String.Equals(context.PrimarySnapshot, await PrimarySnapshot(),
-                             StringComparison.Ordinal);
+        string current = await PrimarySnapshot();
+        bool unchanged = String.Equals(context.PrimarySnapshot, current, StringComparison.Ordinal);
+        if (!unchanged)
+        {
+            var before = Json.Deserialize<Dictionary<string, object>>(context.PrimarySnapshot);
+            var after = Json.Deserialize<Dictionary<string, object>>(current);
+            if (before != null && after != null)
+                foreach (string key in before.Keys)
+                    if (!after.ContainsKey(key) || Json.Serialize(before[key]) != Json.Serialize(after[key]))
+                        Console.Error.WriteLine("Primary snapshot changed field: " + key);
+            var oldEditors = before == null ? null : before["editors"] as System.Collections.IList;
+            var newEditors = after == null ? null : after["editors"] as System.Collections.IList;
+            if (oldEditors != null && newEditors != null && oldEditors.Count == newEditors.Count)
+                for (int index = 0; index < oldEditors.Count; index++)
+                {
+                    var oldEditor = oldEditors[index] as Dictionary<string, object>;
+                    var newEditor = newEditors[index] as Dictionary<string, object>;
+                    if (oldEditor == null || newEditor == null) continue;
+                    foreach (string key in oldEditor.Keys)
+                        if (!newEditor.ContainsKey(key) ||
+                            Json.Serialize(oldEditor[key]) != Json.Serialize(newEditor[key]))
+                            Console.Error.WriteLine("Primary editor changed field: " + key);
+                }
+        }
+        return unchanged;
     }
     async Task VerifyCrossChat(CrossChatContext context, string author)
     {
@@ -999,6 +1051,13 @@ public sealed class TeamsSession : ApplicationContext
                     "document.querySelector('[data-tid=me-control-avatar-trigger]')?.click(); " +
                     "})()");
                 page = await Inspect();
+                var profileDeadline = DateTime.UtcNow.AddSeconds(2);
+                while (!Flag(page, "account_verified") && !Flag(page, "blocked") &&
+                       !Flag(page, "login") && DateTime.UtcNow < profileDeadline)
+                {
+                    await Task.Delay(100);
+                    page = await Inspect();
+                }
                 object fields;
                 if (page.TryGetValue("profile_fields", out fields))
                 {
@@ -1058,6 +1117,9 @@ public sealed class TeamsSession : ApplicationContext
                                                   initialForeground == GetForegroundWindow() },
                                                 { "generation", generation },
                                                 { "restart_required", restartRequired },
+                                                { "capabilities", account && state == "authenticated"
+                                                    ? new string[] { "person_mentions_v1" }
+                                                    : new string[0] },
                                                 { "samples", samples.Count > 0 && !account ? samples : null },
                                                 { "reason", reason } };
     }
@@ -1130,12 +1192,14 @@ public sealed class TeamsSession : ApplicationContext
                 throw new InvalidDataException();
             return new Dictionary<string, object> { { "shutdown", true } };
         }
+        if (op == "teams_web_probe_mention_picker")
+            return await ProbeMentionPicker(request["arguments"] as Dictionary<string, object>);
         if (op == "teams_web_message_link" || op == "teams_web_message_reactions" ||
             op == "teams_web_react_message" || op == "teams_web_set_reaction")
             return await MessageAction(op, request["arguments"] as Dictionary<string, object>);
         if (op == "teams_web_list_chats" || op == "teams_web_read_chat" ||
             op == "teams_web_send_chat" || op == "teams_web_inspect_message" ||
-            op == "teams_web_edit_message")
+            op == "teams_web_inspect_mention_evidence" || op == "teams_web_edit_message")
         {
             object raw;
             if (!request.TryGetValue("arguments", out raw))
@@ -1147,8 +1211,8 @@ public sealed class TeamsSession : ApplicationContext
                 return await ListChats(args);
             if (op == "teams_web_read_chat")
                 return await Read(args);
-            if (op == "teams_web_inspect_message")
-                return await InspectMessage(args);
+            if (op == "teams_web_inspect_message" || op == "teams_web_inspect_mention_evidence")
+                return await InspectMessage(args, op == "teams_web_inspect_mention_evidence");
             if (op == "teams_web_edit_message")
                 return await EditMessage(args);
             return await Send(args);
@@ -1800,7 +1864,8 @@ public sealed class TeamsSession : ApplicationContext
         await VerifyCrossChat(context, author);
         return result;
     }
-    async Task<Dictionary<string, object>> InspectMessage(Dictionary<string, object> args)
+    async Task<Dictionary<string, object>> InspectMessage(
+        Dictionary<string, object> args, bool mentionDiagnostics = false)
     {
         if (Flag(args, "validate_format"))
         {
@@ -1827,20 +1892,463 @@ public sealed class TeamsSession : ApplicationContext
             throw new InvalidDataException();
         var context = await BeginCrossChat();
         string authorName = currentAccountName;
+        if (context.ProtectPrimary)
+            await OpenExactChatOnAuxiliary(context.Core, chatId, title);
         await Read(new Dictionary<string, object> {
-            { "chat", chat }, { "limit", 50 }
+            { "chat", chat }, { "limit", 1 }
         }, context);
+        var locateRequest = new Dictionary<string, object> {
+            { "phase", "message_locate" }, { "chatId", chatId }, { "title", title },
+            { "messageId", messageId }
+        };
+        var locateDeadline = DateTime.UtcNow.AddSeconds(15);
+        Dictionary<string, object> located;
+        do {
+            await VerifyCrossChat(context, authorName);
+            located = await RunChat(context.Core, locateRequest);
+            if (Convert.ToString(located["state"]) != "waiting") break;
+            await Task.Delay(250);
+        } while (DateTime.UtcNow < locateDeadline);
+        if (Convert.ToString(located["state"]) != "message_loaded")
+            throw new InvalidOperationException("message_not_loaded");
         var request = new Dictionary<string, object> {
             { "phase", "inspect_message" }, { "chatId", chatId }, { "title", title },
-            { "messageId", messageId }, { "authorName", authorName }, { "menuAction", "" }
+            { "messageId", messageId }, { "authorName", authorName }, { "menuAction", "" },
+            { "mentionDiagnostics", mentionDiagnostics }
         };
         var result = await RunChat(context.Core, request);
         await VerifyCrossChat(context, authorName);
+        if (mentionDiagnostics)
+        {
+            result["chat_id"] = chatId;
+            result["title"] = title;
+            result["message_id"] = messageId;
+        }
         return result;
+    }
+    async Task<Dictionary<string, object>> ProbeMentionPicker(Dictionary<string, object> args)
+    {
+        if (args == null || args.Keys.Any(key => key != "chat" && key != "recipient_email" &&
+                                                key != "display_label" &&
+                                                key != "expected_probe_text" &&
+                                                key != "expected_probe_mri") ||
+            String.IsNullOrEmpty(groupScript))
+            throw new InvalidDataException();
+        object chatValue, recipientValue;
+        if (!args.TryGetValue("chat", out chatValue) ||
+            !args.TryGetValue("recipient_email", out recipientValue))
+            throw new InvalidDataException();
+        var chat = chatValue as Dictionary<string, object>;
+        if (chat == null || chat.Count != 2 || !chat.ContainsKey("chat_id") ||
+            !chat.ContainsKey("title"))
+            throw new InvalidDataException();
+        string chatId = Convert.ToString(chat["chat_id"]);
+        string title = Convert.ToString(chat["title"]);
+        string recipient = recipientValue as string;
+        object rawLabel;
+        string queryLabel = args.TryGetValue("display_label", out rawLabel) ? rawLabel as string : recipient;
+        if (String.IsNullOrWhiteSpace(queryLabel) || queryLabel.Length > 120 ||
+            queryLabel.IndexOfAny(new[] { '\r', '\n' }) >= 0)
+            throw new InvalidDataException();
+        object rawProbeText, rawProbeMri;
+        string expectedProbeText = args.TryGetValue("expected_probe_text", out rawProbeText)
+            ? rawProbeText as string : null;
+        string expectedProbeMri = args.TryGetValue("expected_probe_mri", out rawProbeMri)
+            ? rawProbeMri as string : null;
+        if ((expectedProbeText == null) != (expectedProbeMri == null) ||
+            (rawProbeText != null && expectedProbeText == null) ||
+            (rawProbeMri != null && expectedProbeMri == null) ||
+            (expectedProbeText != null && (expectedProbeText.Length > 250 ||
+                !Regex.IsMatch(expectedProbeMri, "^8:orgid:[0-9a-fA-F-]{36}$"))))
+            throw new InvalidDataException();
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
+            String.IsNullOrWhiteSpace(recipient) || recipient.Length > 254 ||
+            !Regex.IsMatch(recipient,
+                "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@" +
+                "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?" +
+                "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"))
+            throw new InvalidDataException();
+        Console.Error.WriteLine("Mention probe: verify hidden account.");
+        CrossChatContext context;
+        if (expectedProbeText != null &&
+            await AuxiliaryHasExactChat(controller.CoreWebView2, chatId, title))
+        {
+            var status = await Status();
+            if (Convert.ToString(status["state"]) != "authenticated" ||
+                Flag(status, "restart_required") || interference)
+                throw new InvalidOperationException("identity_failed");
+            context = new CrossChatContext { Core = controller.CoreWebView2,
+                PrimarySnapshot = await PrimarySnapshot(), ProtectPrimary = false };
+        }
+        else
+            context = await BeginCrossChat();
+        string author = currentAccountName;
+        Console.Error.WriteLine("Mention probe: open exact auxiliary chat.");
+        Exception navigationError = null;
+        try {
+            if (context.ProtectPrimary)
+                await OpenExactChatOnAuxiliary(context.Core, chatId, title);
+            else
+                await Read(new Dictionary<string, object> { { "chat", chat }, { "limit", 1 } }, context);
+        }
+        catch (InvalidOperationException error) { navigationError = error; }
+        if (navigationError != null)
+        {
+            if (navigationError.Message != "draft_exists")
+                throw navigationError;
+            var draft = await RunChat(context.Core, new Dictionary<string, object> {
+                { "phase", "mention_probe_draft_status" }, { "chatId", chatId }, { "title", title },
+                { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+            });
+            await VerifyCrossChat(context, author);
+            return draft;
+        }
+        var initial = await ExecuteChat(context.Core, new Dictionary<string, object> {
+            { "phase", "snapshot" }
+        });
+        var composerDeadline = DateTime.UtcNow.AddSeconds(10);
+        while (Convert.ToInt32(initial["editor_count"]) == 0 &&
+               DateTime.UtcNow < composerDeadline)
+        {
+            await Task.Delay(200);
+            initial = await ExecuteChat(context.Core, new Dictionary<string, object> {
+                { "phase", "snapshot" }
+            });
+        }
+        if (Convert.ToInt32(initial["editor_count"]) != 1)
+            throw new InvalidOperationException("composer_unavailable");
+        if (Flag(initial, "dirty") && expectedProbeText != null)
+        {
+            var recovery = await RunChat(context.Core, new Dictionary<string, object> {
+                { "phase", "mention_probe_recover" }, { "chatId", chatId }, { "title", title },
+                { "expectedProbeText", expectedProbeText }, { "expectedProbeMri", expectedProbeMri },
+                { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+            });
+            if (Convert.ToString(recovery["state"]) != "probe_recovery_prepared")
+                return await RunChat(context.Core, new Dictionary<string, object> {
+                    { "phase", "mention_probe_draft_status" }, { "chatId", chatId }, { "title", title },
+                    { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+                });
+            await context.Core.CallDevToolsProtocolMethodAsync(
+                "Emulation.setFocusEmulationEnabled", "{\"enabled\":true}");
+            recovery = await ClearMentionProbe(context.Core, new Dictionary<string, object> {
+                { "phase", "mention_probe_clear" }, { "chatId", chatId }, { "title", title }
+            });
+            await context.Core.CallDevToolsProtocolMethodAsync(
+                "Emulation.setFocusEmulationEnabled", "{\"enabled\":false}");
+            if (Convert.ToString(recovery["state"]) != "composer_restored")
+                return await RunChat(context.Core, new Dictionary<string, object> {
+                    { "phase", "mention_probe_draft_status" }, { "chatId", chatId }, { "title", title },
+                    { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+                });
+            // The explicitly identified probe draft can synchronize across views.
+            // Capture the baseline after its authorized cleanup.
+            context.PrimarySnapshot = await PrimarySnapshot();
+            initial = await ExecuteChat(context.Core, new Dictionary<string, object> {
+                { "phase", "snapshot" }
+            });
+        }
+        if (Flag(initial, "dirty"))
+        {
+            var draft = await RunChat(context.Core, new Dictionary<string, object> {
+                { "phase", "mention_probe_draft_status" }, { "chatId", chatId }, { "title", title },
+                { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+            });
+            await VerifyCrossChat(context, author);
+            return draft;
+        }
+        if (!await PrimaryUnchanged(context) || !ScriptsUnchanged())
+            throw new InvalidOperationException("primary_state_changed");
+        var prepared = await RunChat(context.Core, new Dictionary<string, object> {
+            { "phase", "mention_probe_prepare" }, { "chatId", chatId }, { "title", title },
+            { "queryText", queryLabel },
+            { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+        });
+        Console.Error.WriteLine("Mention probe: prepare " + Convert.ToString(prepared["state"]));
+        if (Convert.ToString(prepared["state"]) != "probe_prepared")
+            throw new InvalidOperationException(Convert.ToString(prepared["state"]));
+        bool focusEmulation = false;
+        bool probeCleared = false;
+        Exception operationError = null;
+        Dictionary<string, object> result = null;
+        string state = "probe_failed";
+        string displayLabel = null;
+        try
+        {
+            await context.Core.CallDevToolsProtocolMethodAsync(
+                "Emulation.setFocusEmulationEnabled", "{\"enabled\":true}");
+            focusEmulation = true;
+            var focused = await RunChat(context.Core, new Dictionary<string, object> {
+                { "phase", "mention_probe_focus" }, { "chatId", chatId }, { "title", title }
+            });
+            if (Convert.ToString(focused["state"]) != "probe_focused")
+                throw new InvalidOperationException(Convert.ToString(focused["state"]));
+            await TypeMentionQuery(context.Core, queryLabel);
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!await PrimaryUnchanged(context) || !ScriptsUnchanged())
+                    throw new InvalidOperationException("primary_state_changed");
+                result = await RunChat(context.Core, new Dictionary<string, object> {
+                    { "phase", "mention_probe_options" }, { "chatId", chatId }, { "title", title },
+                    { "accountLabel", author },
+                    { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+                });
+                state = Convert.ToString(result["state"]);
+                Console.Error.WriteLine("Mention probe: options " + state);
+                if (state == "candidate_verified" || state == "membership_prompt" ||
+                    state == "identity_unverified" || state == "probe_changed" ||
+                    state == "no_person_candidates")
+                    break;
+                if (state != "waiting")
+                    throw new InvalidOperationException(state);
+                await Task.Delay(200);
+            }
+            if (state == "candidate_verified")
+            {
+                displayLabel = Convert.ToString(result["display_label"]);
+                result = await RunChat(context.Core, new Dictionary<string, object> {
+                    { "phase", "mention_probe_select" }, { "chatId", chatId }, { "title", title },
+                    { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+                });
+                state = Convert.ToString(result["state"]);
+                Console.Error.WriteLine("Mention probe selection: " + Json.Serialize(result));
+                if (state == "candidate_selected")
+                {
+                    var chipDeadline = DateTime.UtcNow.AddSeconds(5);
+                    while (DateTime.UtcNow < chipDeadline)
+                    {
+                        result = await RunChat(context.Core, new Dictionary<string, object> {
+                            { "phase", "mention_probe_chip" }, { "chatId", chatId }, { "title", title },
+                            { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+                        });
+                        state = Convert.ToString(result["state"]);
+                        Console.Error.WriteLine("Mention probe chip: " + Json.Serialize(result));
+                        if (state != "waiting")
+                            break;
+                        await Task.Delay(150);
+                    }
+                    if (state == "chip_verified")
+                    {
+                        var cleared = await ClearMentionProbe(context.Core, new Dictionary<string, object> {
+                            { "phase", "mention_probe_clear" }, { "chatId", chatId }, { "title", title },
+                            { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+                        });
+                        if (Convert.ToString(cleared["state"]) != "composer_restored")
+                            throw new InvalidOperationException(Convert.ToString(cleared["state"]));
+                        probeCleared = true;
+                        var snapshot = await ExecuteChat(context.Core, new Dictionary<string, object> {
+                            { "phase", "snapshot" }
+                        });
+                        if (Flag(snapshot, "dirty") || Convert.ToInt32(snapshot["editor_count"]) != 1)
+                            throw new InvalidOperationException("composer_not_restored");
+                        result["display_label"] = displayLabel;
+                        result["state"] = "probe_verified";
+                        state = "probe_verified";
+                    }
+                }
+            }
+            if (state != "probe_verified")
+            {
+                var cleanup = await ClearMentionProbe(context.Core, new Dictionary<string, object> {
+                    { "phase", "mention_probe_clear" }, { "chatId", chatId }, { "title", title },
+                    { "mention", new Dictionary<string, object> { { "recipient_email", recipient } } }
+                });
+                if (Convert.ToString(cleanup["state"]) != "composer_restored")
+                    throw new InvalidOperationException(Convert.ToString(cleanup["state"]));
+                probeCleared = true;
+                if (result == null)
+                    result = new Dictionary<string, object>();
+                result["state"] = state;
+            }
+            if (state == "probe_verified")
+            {
+            context.Core.Reload();
+            var reloadDeadline = DateTime.UtcNow.AddSeconds(20);
+            bool reloadedChat = false;
+            while (DateTime.UtcNow < reloadDeadline)
+            {
+                if (!await PrimaryUnchanged(context))
+                    throw new InvalidOperationException("primary_state_changed");
+                var page = await Inspect(context.Core);
+                if (Flag(page, "blocked"))
+                    throw new InvalidOperationException("identity_failed");
+                if (Flag(page, "app"))
+                {
+                    if (await AuxiliaryAuthenticated(context.Core) && currentAccountName == author)
+                    {
+                        await Read(new Dictionary<string, object> {
+                            { "chat", chat }, { "limit", 1 }
+                        }, context);
+                        if (await AuxiliaryHasExactChat(context.Core, chatId, title))
+                        {
+                            reloadedChat = true;
+                            break;
+                        }
+                    }
+                }
+                await Task.Delay(200);
+            }
+            if (!reloadedChat)
+                throw new InvalidOperationException("destination_failed");
+            var afterReload = await ExecuteChat(context.Core, new Dictionary<string, object> {
+                { "phase", "snapshot" }
+            });
+            if (Flag(afterReload, "dirty"))
+                throw new InvalidOperationException("probe_draft_persisted");
+            }
+            await VerifyCrossChat(context, author);
+        }
+        catch (Exception error)
+        {
+            operationError = error;
+        }
+        if (operationError != null && !probeCleared)
+        {
+            try
+            {
+                var cleanup = await ClearMentionProbe(context.Core, new Dictionary<string, object> {
+                    { "phase", "mention_probe_clear" }, { "chatId", chatId }, { "title", title }
+                });
+                if (Convert.ToString(cleanup["state"]) != "composer_restored")
+                    Console.Error.WriteLine("Mention probe cleanup: " + Convert.ToString(cleanup["state"]));
+            }
+            catch { Console.Error.WriteLine("Mention probe cleanup: failed"); }
+        }
+        if (focusEmulation)
+        {
+            try
+            {
+                await context.Core.CallDevToolsProtocolMethodAsync(
+                    "Emulation.setFocusEmulationEnabled", "{\"enabled\":false}");
+            }
+            catch { }
+        }
+        if (operationError != null)
+            throw operationError;
+        return result;
+    }
+    async Task<Dictionary<string, object>> ClearMentionProbe(
+        CoreWebView2 core, Dictionary<string, object> request)
+    {
+        var result = await RunChat(core, request);
+        if (Convert.ToString(result["state"]) != "probe_clear_ready")
+            return result;
+        await DeleteSelectedEditorText(core);
+        request["phase"] = "mention_probe_cleared";
+        return await RunChat(core, request);
+    }
+    async Task DeleteSelectedEditorText(CoreWebView2 core)
+    {
+        // A trusted editor key event updates CKEditor's model as well as its DOM.
+        // Merely replacing DOM children can leave a draft that reappears on reload.
+        foreach (string eventType in new[] { "keyDown", "keyUp" })
+            await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent",
+                Json.Serialize(new Dictionary<string, object> {
+                    { "type", eventType }, { "key", "a" }, { "code", "KeyA" },
+                    { "windowsVirtualKeyCode", 65 }, { "nativeVirtualKeyCode", 65 },
+                    { "modifiers", 2 }
+                }));
+        foreach (string eventType in new[] { "keyDown", "keyUp" })
+            await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent",
+                Json.Serialize(new Dictionary<string, object> {
+                    { "type", eventType }, { "key", "Backspace" }, { "code", "Backspace" },
+                    { "windowsVirtualKeyCode", 8 }, { "nativeVirtualKeyCode", 8 }
+                }));
+        await Task.Delay(200);
+    }
+    async Task<Dictionary<string, object>> ClearOwnedSendDraft(
+        CoreWebView2 core, Dictionary<string, object> request)
+    {
+        var result = await RunChat(core, request);
+        if (Convert.ToString(result["state"]) != "composer_clear_ready")
+            return result;
+        await DeleteSelectedEditorText(core);
+        request["phase"] = "send_abort_cleared";
+        return await RunChat(core, request);
+    }
+    sealed class MentionPlanItem
+    {
+        public string Key;
+        public string DisplayLabel;
+        public string RecipientEmail;
+    }
+    static List<MentionPlanItem> ValidateMentionPlan(
+        object raw, string body, string bodyFormat)
+    {
+        var result = new List<MentionPlanItem>();
+        if (raw == null)
+        {
+            if (body.Contains("{{mention:"))
+                throw new InvalidDataException();
+            return result;
+        }
+        var items = raw as System.Collections.IList;
+        if (items == null || items.Count < 1 || items.Count > 10 || bodyFormat != "plain")
+            throw new InvalidDataException();
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var recipients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (object value in items)
+        {
+            var item = value as Dictionary<string, object>;
+            if (item == null || item.Count != 3 || !item.ContainsKey("key") ||
+                !item.ContainsKey("display_label") || !item.ContainsKey("recipient_email"))
+                throw new InvalidDataException();
+            string key = item["key"] as string;
+            string label = item["display_label"] as string;
+            string email = item["recipient_email"] as string;
+            if (String.IsNullOrEmpty(key) || !Regex.IsMatch(key, "^[a-z0-9-]{1,32}$") ||
+                String.IsNullOrWhiteSpace(label) || label.Length > 120 ||
+                label != label.Trim() || label.Any(Char.IsControl) ||
+                String.IsNullOrEmpty(email) || email.Length > 254 ||
+                !Regex.IsMatch(email,
+                    "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@" +
+                    "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?" +
+                    "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$") ||
+                !keys.Add(key) || !recipients.Add(email))
+                throw new InvalidDataException();
+            result.Add(new MentionPlanItem {
+                Key = key, DisplayLabel = label, RecipientEmail = email
+            });
+        }
+        var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        var orderedKeys = new List<string>();
+        foreach (Match match in Regex.Matches(body, "\\{\\{mention:([a-z0-9-]{1,32})\\}\\}"))
+        {
+            string key = match.Groups[1].Value;
+            if (!keys.Contains(key))
+                throw new InvalidDataException();
+            if (!occurrences.ContainsKey(key))
+                occurrences[key] = 0;
+            occurrences[key]++;
+            orderedKeys.Add(key);
+        }
+        string unparsedBody = Regex.Replace(body, "\\{\\{mention:([a-z0-9-]{1,32})\\}\\}", "");
+        if (unparsedBody.Contains("{{mention:") || occurrences.Count != result.Count ||
+            result.Any(item => !occurrences.ContainsKey(item.Key) || occurrences[item.Key] != 1))
+            throw new InvalidDataException();
+        if (orderedKeys.Count != result.Count || orderedKeys.Distinct().Count() != result.Count ||
+            !orderedKeys.SequenceEqual(result.Select(item => item.Key)))
+            throw new InvalidDataException();
+        return result;
+    }
+    static string CanonicalMentionPlan(List<MentionPlanItem> mentions)
+    {
+        return "[" + String.Join(",", mentions.Select(item =>
+            "{\"display_label\":" + Json.Serialize(item.DisplayLabel) +
+            ",\"key\":" + Json.Serialize(item.Key) +
+            ",\"recipient_email\":" + Json.Serialize(item.RecipientEmail) + "}")) + "]";
     }
     async Task<Dictionary<string, object>> Send(Dictionary<string, object> args)
     {
-        object chatValue, bodyValue, requestValue, rawFormat, rawHtml, rawFormatting, rawNodes;
+        var allowedArguments = new HashSet<string>(StringComparer.Ordinal) {
+            "chat", "body", "body_format", "html", "formatting", "nodes", "request_id",
+            "mentions", "visible_body"
+        };
+        if (args.Keys.Any(key => !allowedArguments.Contains(key)))
+            throw new InvalidDataException();
+        object chatValue, bodyValue, requestValue, rawFormat, rawHtml, rawFormatting, rawNodes,
+               rawMentions, rawVisibleBody;
         if (!args.TryGetValue("chat", out chatValue) || !args.TryGetValue("body", out bodyValue) ||
             !args.TryGetValue("request_id", out requestValue) || String.IsNullOrEmpty(groupScript))
             throw new InvalidDataException();
@@ -1849,6 +2357,10 @@ public sealed class TeamsSession : ApplicationContext
                                 : "plain";
         string html = args.TryGetValue("html", out rawHtml) ? rawHtml as string : null;
         object nodes = args.TryGetValue("nodes", out rawNodes) ? rawNodes : null;
+        object mentionValue = args.TryGetValue("mentions", out rawMentions) ? rawMentions : null;
+        string requestedVisibleBody = args.TryGetValue("visible_body", out rawVisibleBody)
+                                          ? rawVisibleBody as string
+                                          : null;
         var formatting = args.TryGetValue("formatting", out rawFormatting)
                              ? rawFormatting as Dictionary<string, object>
                              : null;
@@ -1868,6 +2380,14 @@ public sealed class TeamsSession : ApplicationContext
             !Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$") ||
             (bodyFormat != "plain" && bodyFormat != "markdown") || formatting == null ||
             (html != null && html.Length > 12000))
+            throw new InvalidDataException();
+        var mentionPlan = ValidateMentionPlan(mentionValue, body, bodyFormat);
+        string visibleBody = body;
+        foreach (var item in mentionPlan)
+            visibleBody = visibleBody.Replace("{{mention:" + item.Key + "}}", item.DisplayLabel);
+        if ((mentionPlan.Count > 0 &&
+             (requestedVisibleBody != visibleBody || visibleBody.Length > 2000)) ||
+            (mentionPlan.Count == 0 && requestedVisibleBody != null))
             throw new InvalidDataException();
         var context = await BeginCrossChat();
         string authorName = currentAccountName;
@@ -1893,6 +2413,11 @@ public sealed class TeamsSession : ApplicationContext
                              Json.Serialize(formatting))))
                              .Replace("-", "")
                              .ToLowerInvariant();
+            if (mentionPlan.Count > 0)
+                bodyDigest = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(
+                                 bodyDigest + "\0mentions-v1\0" + CanonicalMentionPlan(mentionPlan))))
+                                 .Replace("-", "")
+                                 .ToLowerInvariant();
             targetDigest = BitConverter.ToString(
                                sha.ComputeHash(Encoding.UTF8.GetBytes(chatId + "\0" + title)))
                                .Replace("-", "")
@@ -1901,60 +2426,197 @@ public sealed class TeamsSession : ApplicationContext
         string claim = Path.Combine(claims, digest + ".json");
         using (var file = new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None))
         {
-            byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(
-                new Dictionary<string, object> { { "body_sha256", bodyDigest },
-                                                 { "destination_sha256", targetDigest } }));
+            var claimValue = new Dictionary<string, object> {
+                { "body_sha256", bodyDigest }, { "destination_sha256", targetDigest }
+            };
+            if (mentionPlan.Count > 0)
+                claimValue["mentions_sha256"] = BitConverter.ToString(
+                    SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(CanonicalMentionPlan(mentionPlan))))
+                    .Replace("-", "").ToLowerInvariant();
+            byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(claimValue));
             file.Write(bytes, 0, bytes.Length);
             file.Flush(true);
         }
         string phase = context.ProtectPrimary ? "locate" : "navigate";
         string navigationId = Guid.NewGuid().ToString("N");
         var deadline = DateTime.UtcNow.AddSeconds(35);
-        while (DateTime.UtcNow < deadline)
+        int bodyCursor = 0, mentionIndex = 0;
+        bool composerPrepared = false, clickStarted = false, focusEmulation = false;
+        Exception operationError = null;
+        Dictionary<string, object> successfulResult = null;
+        try
         {
-            if (!await PrimaryUnchanged(context))
-                throw new InvalidOperationException("primary_state_changed");
-            var request = new Dictionary<string, object> {
-                { "phase", phase }, { "body", body }, { "bodyFormat", bodyFormat },
-                { "html", html }, { "nodes", nodes }, { "formatting", formatting }, { "chatId", chatId },
-                { "title", title }, { "requestId", requestId }, { "authorName", authorName },
-                { "navigationId", navigationId }
-            };
-            var result = await RunChat(context.Core, request);
-            string state = Convert.ToString(result["state"]);
-            if (state == "navigated" || state == "ready") phase = "prepare";
-            else if (state == "prepared" && bodyFormat == "plain")
+            while (DateTime.UtcNow < deadline)
             {
-                if (!ScriptsUnchanged() || !await PrimaryUnchanged(context))
+                if (!await PrimaryUnchanged(context))
                     throw new InvalidOperationException("primary_state_changed");
-                await context.Core.CallDevToolsProtocolMethodAsync(
-                    "Input.insertText", Json.Serialize(new Dictionary<string, object> { { "text", body } }));
-                phase = "send";
-            }
-            else if (state == "prepared" && bodyFormat == "markdown")
-                phase = "paste";
-            else if (state == "pasted")
-                phase = "send";
-            else if (state == "clicked") phase = "observe";
-            else if (state == "observed")
-            {
-                if (Convert.ToString(result["chat_id"]) != chatId ||
-                    Convert.ToString(result["title"]) != title)
-                    throw new InvalidOperationException();
-                await VerifyCrossChat(context, authorName);
-                string receipt = claim + ".receipt";
-                using (var file = new FileStream(receipt, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                var request = new Dictionary<string, object> {
+                    { "phase", phase }, { "body", body }, { "visibleBody", visibleBody },
+                    { "bodyFormat", bodyFormat }, { "html", html }, { "nodes", nodes },
+                    { "formatting", formatting }, { "chatId", chatId }, { "title", title },
+                    { "requestId", requestId }, { "authorName", authorName },
+                    { "navigationId", navigationId }
+                };
+                if (mentionPlan.Count > 0)
                 {
-                    byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(result));
-                    file.Write(bytes, 0, bytes.Length);
-                    file.Flush(true);
+                    request["mentions"] = mentionPlan.Select(item =>
+                        new Dictionary<string, object> {
+                            { "key", item.Key }, { "display_label", item.DisplayLabel },
+                            { "recipient_email", item.RecipientEmail }
+                        }).ToList();
+                    if (phase == "mention_candidate" || phase == "mention_select" ||
+                        phase == "mention_chip")
+                    {
+                        var active = mentionPlan[mentionIndex];
+                        request["mention"] = new Dictionary<string, object> {
+                            { "key", active.Key }, { "display_label", active.DisplayLabel },
+                            { "recipient_email", active.RecipientEmail },
+                            { "query_text", Regex.Split(active.DisplayLabel, "[,\\s]+")[0] }
+                        };
+                    }
                 }
-                return result;
+                var result = await RunChat(context.Core, request);
+                string state = Convert.ToString(result["state"]);
+                if (state == "navigated" || state == "ready")
+                    phase = "prepare";
+                else if (state == "prepared" && bodyFormat == "plain")
+                {
+                    composerPrepared = true;
+                    if (!ScriptsUnchanged() || !await PrimaryUnchanged(context))
+                        throw new InvalidOperationException("primary_state_changed");
+                    if (mentionPlan.Count == 0)
+                    {
+                        await context.Core.CallDevToolsProtocolMethodAsync(
+                            "Input.insertText",
+                            Json.Serialize(new Dictionary<string, object> { { "text", body } }));
+                        phase = "send";
+                    }
+                    else
+                    {
+                        await context.Core.CallDevToolsProtocolMethodAsync(
+                            "Emulation.setFocusEmulationEnabled", "{\"enabled\":true}");
+                        focusEmulation = true;
+                        var first = mentionPlan[0];
+                        string marker = "{{mention:" + first.Key + "}}";
+                        int markerAt = body.IndexOf(marker, StringComparison.Ordinal);
+                        if (markerAt < 0)
+                            throw new InvalidDataException();
+                        await InsertTrackedSendText(
+                            context.Core, chatId, title, requestId, authorName, navigationId,
+                            body.Substring(bodyCursor, markerAt - bodyCursor));
+                        await InsertTrackedMentionQuery(
+                            context.Core, chatId, title, requestId, authorName, navigationId,
+                            Regex.Split(first.DisplayLabel, "[,\\s]+")[0]);
+                        phase = "mention_candidate";
+                    }
+                }
+                else if (state == "prepared" && bodyFormat == "markdown" && mentionPlan.Count == 0)
+                {
+                    composerPrepared = true;
+                    phase = "paste";
+                }
+                else if (state == "pasted" && bodyFormat == "markdown" && mentionPlan.Count == 0)
+                    phase = "send";
+                else if (state == "candidate_verified")
+                    phase = "mention_select";
+                else if (state == "candidate_selected")
+                    phase = "mention_chip";
+                else if (state == "mention_chip_verified")
+                {
+                    var selected = mentionPlan[mentionIndex];
+                    string marker = "{{mention:" + selected.Key + "}}";
+                    int markerAt = body.IndexOf(marker, bodyCursor, StringComparison.Ordinal);
+                    if (markerAt < 0)
+                        throw new InvalidDataException();
+                    bodyCursor = markerAt + marker.Length;
+                    mentionIndex++;
+                    if (mentionIndex < mentionPlan.Count)
+                    {
+                        var next = mentionPlan[mentionIndex];
+                        string nextMarker = "{{mention:" + next.Key + "}}";
+                        int nextAt = body.IndexOf(nextMarker, bodyCursor, StringComparison.Ordinal);
+                        if (nextAt < 0)
+                            throw new InvalidDataException();
+                        await InsertTrackedSendText(
+                            context.Core, chatId, title, requestId, authorName, navigationId,
+                            body.Substring(bodyCursor, nextAt - bodyCursor));
+                        await InsertTrackedMentionQuery(
+                            context.Core, chatId, title, requestId, authorName, navigationId,
+                            Regex.Split(next.DisplayLabel, "[,\\s]+")[0]);
+                        phase = "mention_candidate";
+                    }
+                    else
+                    {
+                        await InsertTrackedSendText(
+                            context.Core, chatId, title, requestId, authorName, navigationId,
+                            body.Substring(bodyCursor));
+                        phase = "send";
+                    }
+                }
+                else if (state == "clicked")
+                {
+                    clickStarted = true;
+                    phase = "observe";
+                }
+                else if (state == "observed")
+                {
+                    if (Convert.ToString(result["chat_id"]) != chatId ||
+                        Convert.ToString(result["title"]) != title)
+                        throw new InvalidOperationException();
+                    await VerifyCrossChat(context, authorName);
+                    string receipt = claim + ".receipt";
+                    using (var file = new FileStream(receipt, FileMode.CreateNew, FileAccess.Write,
+                                                     FileShare.None))
+                    {
+                        byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(result));
+                        file.Write(bytes, 0, bytes.Length);
+                        file.Flush(true);
+                    }
+                    successfulResult = result;
+                    break;
+                }
+                else if (state != "waiting")
+                    throw new InvalidOperationException(state);
+                await Task.Delay(150);
             }
-            else if (state != "waiting") throw new InvalidOperationException(state);
-            await Task.Delay(150);
+            if (successfulResult == null)
+                throw new TimeoutException();
         }
-        throw new TimeoutException();
+        catch (Exception error)
+        {
+            operationError = error;
+        }
+        if (operationError != null && mentionPlan.Count > 0 && composerPrepared && !clickStarted)
+        {
+            try
+            {
+            var cleanup = await ClearOwnedSendDraft(context.Core, new Dictionary<string, object> {
+                { "phase", "send_abort_cleanup" }, { "chatId", chatId }, { "title", title },
+                { "requestId", requestId }, { "authorName", authorName },
+                { "navigationId", navigationId }
+            });
+            if (Convert.ToString(cleanup["state"]) != "composer_restored")
+                operationError = new InvalidOperationException("composer_not_restored", operationError);
+            }
+            catch (Exception cleanupError)
+            {
+                operationError = new InvalidOperationException("composer_not_restored", cleanupError);
+            }
+        }
+        if (focusEmulation)
+        {
+            try
+            {
+                await context.Core.CallDevToolsProtocolMethodAsync(
+                    "Emulation.setFocusEmulationEnabled", "{\"enabled\":false}");
+            }
+            catch { }
+        }
+        if (operationError != null)
+            throw operationError;
+        if (successfulResult == null)
+            throw new TimeoutException();
+        return successfulResult;
     }
     async Task<Dictionary<string, object>> RunChat(Dictionary<string, object> request)
     {
@@ -1964,6 +2626,60 @@ public sealed class TeamsSession : ApplicationContext
         CoreWebView2 core, Dictionary<string, object> request)
     {
         return await ExecuteChat(core, request);
+    }
+    async Task InsertTrackedSendText(
+        CoreWebView2 core, string chatId, string title, string requestId,
+        string authorName, string navigationId, string text)
+    {
+        if (String.IsNullOrEmpty(text))
+            return;
+        if (!ScriptsUnchanged())
+            throw new InvalidOperationException("script_changed_during_operation");
+        var tracked = await RunChat(core, new Dictionary<string, object> {
+            { "phase", "send_track_text" }, { "chatId", chatId }, { "title", title },
+            { "requestId", requestId }, { "authorName", authorName },
+            { "navigationId", navigationId }, { "trackText", text }
+        });
+        if (Convert.ToString(tracked["state"]) != "track_ready")
+            throw new InvalidOperationException(Convert.ToString(tracked["state"]));
+        await core.CallDevToolsProtocolMethodAsync(
+            "Input.insertText", Json.Serialize(new Dictionary<string, object> { { "text", text } }));
+    }
+    async Task InsertTrackedMentionQuery(
+        CoreWebView2 core, string chatId, string title, string requestId,
+        string authorName, string navigationId, string query)
+    {
+        var tracked = await RunChat(core, new Dictionary<string, object> {
+            { "phase", "send_track_text" }, { "chatId", chatId }, { "title", title },
+            { "requestId", requestId }, { "trackText", "@" + query }
+        });
+        if (Convert.ToString(tracked["state"]) != "track_ready")
+            throw new InvalidOperationException(Convert.ToString(tracked["state"]));
+        await TypeMentionQuery(core, query);
+    }
+    async Task TypeMentionQuery(CoreWebView2 core, string query)
+    {
+        await Task.Delay(500);
+        await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent",
+            "{\"type\":\"keyDown\",\"key\":\"@\",\"code\":\"Digit2\",\"text\":\"@\",\"unmodifiedText\":\"2\",\"windowsVirtualKeyCode\":50,\"modifiers\":8}");
+        await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent",
+            "{\"type\":\"keyUp\",\"key\":\"@\",\"code\":\"Digit2\",\"windowsVirtualKeyCode\":50,\"modifiers\":8}");
+        await Task.Delay(300);
+        foreach (char character in query)
+        {
+            await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent",
+                Json.Serialize(new Dictionary<string, object> {
+                    { "type", "keyDown" }, { "key", character.ToString() },
+                    { "text", character.ToString() },
+                    { "windowsVirtualKeyCode", (int)Char.ToUpperInvariant(character) }
+                }));
+            await core.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent",
+                Json.Serialize(new Dictionary<string, object> {
+                    { "type", "keyUp" }, { "key", character.ToString() },
+                    { "windowsVirtualKeyCode", (int)Char.ToUpperInvariant(character) }
+                }));
+            await Task.Delay(100);
+        }
     }
     async Task<Dictionary<string, object>> EditMessage(Dictionary<string, object> args)
     {
@@ -2238,6 +2954,11 @@ public sealed class TeamsSession : ApplicationContext
                             reason = "host_operation_failed";
                         Console.Error.WriteLine("Teams session operation failed: " + diagnosticReason + " (" +
                                                 error.GetType().Name + ")");
+                        if (error is NullReferenceException)
+                            Console.Error.WriteLine(String.Join(" > ",
+                                new StackTrace(error).GetFrames().Select(frame =>
+                                    frame.GetMethod().DeclaringType.Name + "." +
+                                    frame.GetMethod().Name).Take(8)));
                         response = new Dictionary<string, object> { { "version", 1 },
                                                                     { "ok", false },
                                                                     { "error", reason } };

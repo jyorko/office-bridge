@@ -6,10 +6,16 @@ from actions import ActionError, Response, action
 from pydantic import Field, RootModel
 
 from office_bridge.teams import backend, lookup, messages, service, work_tracking
-from office_bridge.teams.messages import MessageLink, MessageReactions, ReactionReceipt
+from office_bridge.teams.messages import (
+    MentionEvidenceReport,
+    MessageLink,
+    MessageReactions,
+    ReactionReceipt,
+)
 from office_bridge.teams.models import (
     EditReceipt,
     GroupReceipt,
+    PersonMentions,
     TeamsWebStatus,
     UploadReadiness,
     UploadReceipt,
@@ -93,12 +99,31 @@ def teams_web_read_chat(
     return _respond(service.read_chat, chat, limit)
 
 
+@action(is_consequential=False)
+def teams_web_inspect_mention_evidence(
+    chat: WebChatRef,
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")],
+) -> Response[MentionEvidenceReport]:
+    """Read sanitized DOM structure for a settled mention in one exact existing message.
+
+    This diagnostic uses the hidden auxiliary WebView2 and leaves the primary composer unchanged.
+    It returns element structure and hashed value shapes only; it never returns message text,
+    display names, email addresses, account IDs, or raw identity attributes.
+
+    Args:
+        chat: Exact 19: chat reference returned by Teams chat listing or search.
+        message_id: Exact settled message ID from a fresh read of that chat.
+    """
+    return _respond(messages.inspect_mention_evidence, chat, message_id)
+
+
 @action(is_consequential=True)
 def teams_web_send_chat(
     chat: WebChatRef,
     body: Annotated[str, Field(min_length=1, max_length=2000)],
     request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
     body_format: Literal["plain", "markdown"] = "plain",
+    mentions: PersonMentions = PersonMentions([]),
 ) -> Response[GroupReceipt]:
     """Send one message to the verified exact chat reference at most once per request ID.
 
@@ -107,8 +132,11 @@ def teams_web_send_chat(
         body: Complete message text, sent only to the referenced chat.
         request_id: Unique request ID; uncertain outcomes cannot be retried.
         body_format: Plain text or supported CommonMark formatting.
+        mentions: Optional verified person mentions keyed by placeholders in the body. The Teams
+            host must report person_mentions_v1 before any send reservation is created. Notification
+            delivery is not verified.
     """
-    return _respond(service.send_chat, chat, body, request_id, body_format)
+    return _respond(service.send_chat, chat, body, request_id, body_format, mentions)
 
 
 @action(is_consequential=True)

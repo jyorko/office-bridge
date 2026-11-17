@@ -10,10 +10,17 @@ from pathlib import Path
 
 from office_bridge import desktop
 from office_bridge.teams import ledger
-from office_bridge.teams.formatting import BodyFormatError, PreparedBody, format_body
+from office_bridge.teams.formatting import (
+    BodyFormatError,
+    PreparedBody,
+    format_body,
+    validate_mention_placeholders,
+)
 from office_bridge.teams.models import (
     EditReceipt,
     GroupReceipt,
+    PersonMentionReceipt,
+    PersonMentions,
     UploadReadiness,
     UploadReceipt,
     UploadStatus,
@@ -193,6 +200,65 @@ def _prepared_arguments(prepared: PreparedBody, body_format: str) -> dict:
     }
 
 
+def _mention_plan_identity(mentions: PersonMentions) -> list[dict[str, object]]:
+    return [
+        {
+            "key": mention.key,
+            "display_label": mention.display_label,
+            "recipient_email": mention.recipient.email,
+        }
+        for mention in mentions.root
+    ]
+
+
+def _require_mention_capability() -> None:
+    try:
+        status = desktop.invoke("teams_web_status", {})
+    except desktop.BridgeError:
+        raise TeamsError(
+            "Could not verify a mention-capable Teams host; no message was sent."
+        ) from None
+    capabilities = status.get("capabilities")
+    if (
+        status.get("state") != "authenticated"
+        or status.get("account_verified") is not True
+        or status.get("host_visible") is not False
+        or status.get("control_visible") is not False
+        or status.get("foreground_interference") is not False
+        or status.get("restart_required") is not False
+        or not isinstance(capabilities, list)
+        or "person_mentions_v1" not in capabilities
+    ):
+        raise TeamsError("Teams host does not support verified person mentions; reload required.")
+
+
+def _reserve_send(
+    path: Path, request_id: str, digest: str, chat: WebChatRef
+) -> GroupReceipt | None:
+    with sqlite3.connect(path, timeout=3) as db:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS sends (id TEXT PRIMARY KEY, digest TEXT NOT NULL, receipt TEXT)"
+        )
+        db.execute("BEGIN IMMEDIATE")
+        old = db.execute("SELECT digest, receipt FROM sends WHERE id=?", (request_id,)).fetchone()
+        if old:
+            try:
+                saved = json.loads(old[1]) if old[1] else {}
+                old_chat = saved.get("chat")
+                if isinstance(old_chat, dict):
+                    old_chat = WebChatRef.model_validate(old_chat)
+            except (TypeError, ValueError):
+                old_chat = None
+            if old[0] != digest or old_chat != chat:
+                raise TeamsError(
+                    "Request already attempted or conflicts; do not retry automatically."
+                )
+            return GroupReceipt(**{**json.loads(old[1]), "status": "already_observed"})
+        db.execute("INSERT INTO sends(id,digest,receipt) VALUES (?,?,NULL)", (request_id, digest))
+        db.commit()
+    return None
+
+
 def list_chats(name: str | None, limit: int) -> WebChatSearchResult:
     try:
         result = desktop.invoke("teams_web_list_chats", {"name": name, "limit": limit})
@@ -234,7 +300,11 @@ def read_chat(chat: WebChatRef, limit: int) -> WebChatHistory:
 
 
 def send_chat(
-    chat: WebChatRef, body: str, request_id: str, body_format: str = "plain"
+    chat: WebChatRef,
+    body: str,
+    request_id: str,
+    body_format: str = "plain",
+    mentions: PersonMentions = PersonMentions([]),
 ) -> GroupReceipt:
     try:
         if ledger.has_request_id(request_id):
@@ -247,6 +317,24 @@ def send_chat(
         prepared = format_body(body, body_format)
     except BodyFormatError as error:
         raise TeamsError(str(error)) from None
+    mention_keys = {mention.key for mention in mentions.root}
+    try:
+        placeholder_order = validate_mention_placeholders(body, body_format, mention_keys)
+    except BodyFormatError as error:
+        raise TeamsError(str(error)) from None
+    if mentions.root:
+        if placeholder_order != [mention.key for mention in mentions.root]:
+            raise TeamsError("Mention plans must follow placeholder order in the message.")
+        if body_format != "plain":
+            raise TeamsError("Person mentions currently require a plain-text body.")
+        expected_body = prepared.body
+        for mention in mentions.root:
+            expected_body = expected_body.replace(
+                "{{mention:" + mention.key + "}}", mention.display_label
+            )
+        if len(expected_body) > 2000:
+            raise TeamsError("Message body with mention labels must be at most 2000 characters.")
+        _require_mention_capability()
     path = (
         Path(os.environ["LOCALAPPDATA"])
         / "OfficeActionServer"
@@ -254,37 +342,28 @@ def send_chat(
         / "group.sqlite3"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(_rich_identity(body, body_format, prepared).encode("utf-8")).hexdigest()
-    with sqlite3.connect(path, timeout=3) as db:
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS sends (id TEXT PRIMARY KEY, digest TEXT NOT NULL, receipt TEXT)"
+    identity = _rich_identity(body, body_format, prepared)
+    if mentions.root:
+        identity = json.dumps(
+            {"body_identity": identity, "mentions": _mention_plan_identity(mentions)},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
         )
-        db.execute("BEGIN IMMEDIATE")
-        old = db.execute("SELECT digest, receipt FROM sends WHERE id=?", (request_id,)).fetchone()
-        if old:
-            try:
-                saved = json.loads(old[1]) if old[1] else {}
-                old_chat = saved.get("chat")
-                if isinstance(old_chat, dict):
-                    old_chat = WebChatRef.model_validate(old_chat)
-            except (TypeError, ValueError):
-                old_chat = None
-            if old[0] != digest or old_chat != chat:
-                raise TeamsError(
-                    "Request already attempted or conflicts; do not retry automatically."
-                )
-            return GroupReceipt(**{**json.loads(old[1]), "status": "already_observed"})
-        db.execute("INSERT INTO sends(id,digest,receipt) VALUES (?,?,NULL)", (request_id, digest))
-        db.commit()
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    cached = _reserve_send(path, request_id, digest, chat)
+    if cached is not None:
+        return cached
     try:
-        result = desktop.invoke(
-            "teams_web_send_chat",
-            {
-                "chat": chat.model_dump(mode="json"),
-                **_prepared_arguments(prepared, body_format),
-                "request_id": request_id,
-            },
-        )
+        arguments = {
+            "chat": chat.model_dump(mode="json"),
+            **_prepared_arguments(prepared, body_format),
+            "request_id": request_id,
+        }
+        if mentions.root:
+            arguments["mentions"] = _mention_plan_identity(mentions)
+            arguments["visible_body"] = expected_body
+        result = desktop.invoke("teams_web_send_chat", arguments)
         if (
             result.get("state") != "observed"
             or not result.get("message_id")
@@ -293,11 +372,28 @@ def send_chat(
             or result.get("title") != chat.title
         ):
             raise ValueError("unverified")
+        receipt_mentions = []
+        if mentions.root:
+            raw_mentions = result.get("mentions")
+            if not isinstance(raw_mentions, list) or len(raw_mentions) != len(mentions.root):
+                raise ValueError("mention entities unverified")
+            for expected, actual in zip(mentions.root, raw_mentions, strict=True):
+                item = PersonMentionReceipt.model_validate(actual)
+                if (
+                    item.key != expected.key
+                    or item.text != expected.display_label
+                    or item.recipient_email.casefold() != expected.recipient.email.casefold()
+                    or not item.identity_evidence
+                    or item.entity_verified is not True
+                ):
+                    raise ValueError("mention entity mismatch")
+                receipt_mentions.append(item)
         receipt = GroupReceipt(
             status="observed",
             chat=chat,
             message_id=result["message_id"],
             time=result["time"],
+            mentions=receipt_mentions,
         )
         with sqlite3.connect(path, timeout=3) as db:
             db.execute(

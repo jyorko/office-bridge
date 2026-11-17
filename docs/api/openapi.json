@@ -2328,6 +2328,13 @@
                                 }
                               ],
                               "title": "Restart Required"
+                            },
+                            "capabilities": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array",
+                              "title": "Capabilities"
                             }
                           },
                           "additionalProperties": false,
@@ -5637,6 +5644,52 @@
                     "title": "Body Format",
                     "description": "Plain text or supported CommonMark formatting.",
                     "default": "plain"
+                  },
+                  "mentions": {
+                    "items": {
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9-]{1,32}$",
+                          "title": "Key"
+                        },
+                        "display_label": {
+                          "type": "string",
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "title": "Display Label"
+                        },
+                        "recipient": {
+                          "properties": {
+                            "email": {
+                              "type": "string",
+                              "maxLength": 320,
+                              "minLength": 3,
+                              "title": "Email"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": [
+                            "email"
+                          ],
+                          "title": "MentionRecipient"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "key",
+                        "display_label",
+                        "recipient"
+                      ],
+                      "title": "PersonMention"
+                    },
+                    "type": "array",
+                    "maxItems": 10,
+                    "title": "Mentions",
+                    "description": "Optional verified person mentions keyed by placeholders in the body. The Teams\nhost must report person_mentions_v1 before any send reservation is created. Notification\ndelivery is not verified.",
+                    "default": []
                   }
                 },
                 "type": "object",
@@ -5698,6 +5751,45 @@
                             "time": {
                               "type": "string",
                               "title": "Time"
+                            },
+                            "mentions": {
+                              "items": {
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "title": "Key"
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "title": "Text"
+                                  },
+                                  "recipient_email": {
+                                    "type": "string",
+                                    "title": "Recipient Email"
+                                  },
+                                  "identity_evidence": {
+                                    "type": "string",
+                                    "title": "Identity Evidence"
+                                  },
+                                  "entity_verified": {
+                                    "type": "boolean",
+                                    "title": "Entity Verified"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "key",
+                                  "text",
+                                  "recipient_email",
+                                  "identity_evidence",
+                                  "entity_verified"
+                                ],
+                                "title": "PersonMentionReceipt",
+                                "description": "One observed Teams mention entity; notification delivery is not verified."
+                              },
+                              "type": "array",
+                              "title": "Mentions",
+                              "description": "Observed mention entities. This does not verify that Teams delivered notifications."
                             }
                           },
                           "type": "object",
@@ -8919,6 +9011,315 @@
                   },
                   "type": "object",
                   "title": "Response for Teams Web Upload Status"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-inspect-mention-evidence/run": {
+      "post": {
+        "summary": "Teams Web Inspect Mention Evidence",
+        "description": "Read sanitized DOM structure for a settled mention in one exact existing message.\nThis diagnostic uses the hidden auxiliary WebView2 and leaves the primary composer unchanged.\nIt returns element structure and hashed value shapes only; it never returns message text,\ndisplay names, email addresses, account IDs, or raw identity attributes.",
+        "operationId": "teams_web_inspect_mention_evidence",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact 19: chat reference returned by Teams chat listing or search."
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "title": "Message Id",
+                    "description": "Exact settled message ID from a fresh read of that chat."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "message_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "inspected",
+                                "no_mentions"
+                              ],
+                              "title": "State"
+                            },
+                            "capture_date": {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "title": "Capture Date"
+                            },
+                            "mentions": {
+                              "items": {
+                                "properties": {
+                                  "tag": {
+                                    "type": "string",
+                                    "maxLength": 30,
+                                    "minLength": 1,
+                                    "title": "Tag"
+                                  },
+                                  "depth": {
+                                    "type": "integer",
+                                    "maximum": 19.0,
+                                    "minimum": 0.0,
+                                    "title": "Depth"
+                                  },
+                                  "ancestors": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array",
+                                    "maxItems": 12,
+                                    "title": "Ancestors"
+                                  },
+                                  "attribute_names": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array",
+                                    "maxItems": 30,
+                                    "title": "Attribute Names"
+                                  },
+                                  "attributes": {
+                                    "items": {
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "maxLength": 80,
+                                          "minLength": 1,
+                                          "title": "Name"
+                                        },
+                                        "value_shape": {
+                                          "properties": {
+                                            "prefix_class": {
+                                              "type": "string",
+                                              "enum": [
+                                                "empty",
+                                                "email",
+                                                "hex-or-guid",
+                                                "numeric",
+                                                "url",
+                                                "identifier",
+                                                "text"
+                                              ],
+                                              "title": "Prefix Class"
+                                            },
+                                            "length": {
+                                              "type": "integer",
+                                              "maximum": 4096.0,
+                                              "minimum": 0.0,
+                                              "title": "Length"
+                                            },
+                                            "hash": {
+                                              "type": "string",
+                                              "pattern": "^[0-9a-f]{8}$",
+                                              "title": "Hash"
+                                            }
+                                          },
+                                          "type": "object",
+                                          "required": [
+                                            "prefix_class",
+                                            "length",
+                                            "hash"
+                                          ],
+                                          "title": "MentionValueShape"
+                                        }
+                                      },
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "value_shape"
+                                      ],
+                                      "title": "MentionAttributeEvidence"
+                                    },
+                                    "type": "array",
+                                    "maxItems": 30,
+                                    "title": "Attributes"
+                                  },
+                                  "role": {
+                                    "type": "string",
+                                    "maxLength": 40,
+                                    "title": "Role"
+                                  },
+                                  "role_shape": {
+                                    "properties": {
+                                      "prefix_class": {
+                                        "type": "string",
+                                        "enum": [
+                                          "empty",
+                                          "email",
+                                          "hex-or-guid",
+                                          "numeric",
+                                          "url",
+                                          "identifier",
+                                          "text"
+                                        ],
+                                        "title": "Prefix Class"
+                                      },
+                                      "length": {
+                                        "type": "integer",
+                                        "maximum": 4096.0,
+                                        "minimum": 0.0,
+                                        "title": "Length"
+                                      },
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{8}$",
+                                        "title": "Hash"
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "prefix_class",
+                                      "length",
+                                      "hash"
+                                    ],
+                                    "title": "MentionValueShape"
+                                  },
+                                  "itemtype": {
+                                    "type": "string",
+                                    "maxLength": 80,
+                                    "title": "Itemtype"
+                                  },
+                                  "data_tid_shape": {
+                                    "properties": {
+                                      "prefix_class": {
+                                        "type": "string",
+                                        "enum": [
+                                          "empty",
+                                          "email",
+                                          "hex-or-guid",
+                                          "numeric",
+                                          "url",
+                                          "identifier",
+                                          "text"
+                                        ],
+                                        "title": "Prefix Class"
+                                      },
+                                      "length": {
+                                        "type": "integer",
+                                        "maximum": 4096.0,
+                                        "minimum": 0.0,
+                                        "title": "Length"
+                                      },
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{8}$",
+                                        "title": "Hash"
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "prefix_class",
+                                      "length",
+                                      "hash"
+                                    ],
+                                    "title": "MentionValueShape"
+                                  }
+                                },
+                                "type": "object",
+                                "required": [
+                                  "tag",
+                                  "depth",
+                                  "ancestors",
+                                  "attribute_names",
+                                  "attributes",
+                                  "role",
+                                  "role_shape",
+                                  "itemtype",
+                                  "data_tid_shape"
+                                ],
+                                "title": "MentionEntityEvidence"
+                              },
+                              "type": "array",
+                              "maxItems": 20,
+                              "title": "Mentions"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "state",
+                            "capture_date",
+                            "mentions"
+                          ],
+                          "title": "MentionEvidenceReport",
+                          "description": "Sanitized DOM structure for a settled mention; it contains no identity values or text."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Inspect Mention Evidence"
                 }
               }
             }
