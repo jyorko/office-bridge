@@ -56,14 +56,18 @@ def outlook_search_inbox(query: InboxQuery, limit: Limit = 20) -> Response[Inbox
 
 @tool(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
 def outlook_create_reply_draft(
-    source: MessageRef, body_text: Text, expected_source: MessageVersion
+    source: MessageRef,
+    body_text: Text,
+    expected_source: MessageVersion,
+    reply_all: bool = False,
 ) -> Response[ReplyDraft]:
-    """Save one plain-text reply draft after checking the source version. Never sends.
+    """Save an attachment-free, plain-text reply or reply-all draft. Never sends.
 
     Args:
         source: Entry and store identity of the source mail.
         body_text: Complete plain-text reply body, at most 20000 characters.
         expected_source: Unchanged version returned by the last mail read.
+        reply_all: Include the source message's other recipients when true.
     """
     return desktop.run(
         "create_reply_draft",
@@ -71,6 +75,7 @@ def outlook_create_reply_draft(
         source=source,
         body_text=body_text,
         expected_source=expected_source,
+        reply_all=reply_all,
     )
 
 

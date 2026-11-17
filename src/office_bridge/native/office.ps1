@@ -134,10 +134,13 @@ try{
    if(-not $a.body_text -or $a.body_text.Length -gt 20000){Fail 'invalid_input'}
    $accounts=@($ns.Accounts | Where-Object {$_.DeliveryStore.StoreID -ceq $item.Parent.StoreID})
    if($accounts.Count -ne 1){Fail 'unresolved_recipient'}
-   $mutationStarted=$true;$reply=$item.Reply()
+   $mutationStarted=$true
+   if($a.reply_all){$reply=$item.ReplyAll()}else{$reply=$item.Reply()}
    [void]$reply.GetType().InvokeMember('SendUsingAccount',[Reflection.BindingFlags]::SetProperty,$null,$reply,@($accounts[0].PSObject.BaseObject))
    if(-not $reply.Recipients.ResolveAll()){Fail 'unresolved_recipient'}
-   $reply.BodyFormat=1;$reply.Body=[string]$a.body_text;[void](Digest $reply);$reply.Save()
+   $reply.BodyFormat=1;$reply.Body=[string]$a.body_text
+   while($reply.Attachments.Count -gt 0){$reply.Attachments.Item(1).Delete()}
+   [void](Digest $reply);$reply.Save()
    $digest=Digest $reply
    $result=@{ref=(Ref $reply);source=(Ref $item);recipients=@(Recipients $reply);subject=[string]$reply.Subject;body_text=[string]$reply.Body;sending_account=[string](Effective-Account $reply).SmtpAddress;digest=$digest}
   }

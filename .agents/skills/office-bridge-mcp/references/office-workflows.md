@@ -13,7 +13,7 @@ Use a unique request ID for an authorized question. Read by that same ID to coll
 
 - `outlook_inbox_list(limit?, unread_only?)` lists recent mail; `outlook_search_inbox(query, limit?)` applies literal subject/sender and date/unread filters. `outlook_get_message(message)` reads a selected message. Carry the exact `MessageRef` and `MessageVersion` from results.
 - `outlook_download_attachments(entry_id, store_id, pdf_only?)` saves bounded attachments without opening them.
-- `outlook_create_reply_draft(source, body_text, expected_source)` creates a reply draft after checking the source version. `outlook_create_mail_draft(recipient_email, subject, body_text)` is restricted to the signed-in user's company address. Neither sends.
+- `outlook_create_reply_draft(source, body_text, expected_source, reply_all?)` creates a reply draft after checking the source version. Set `reply_all: true` to include the source message's other recipients, then inspect the returned recipients before sending. `outlook_create_mail_draft(recipient_email, subject, body_text)` is restricted to the signed-in user's company address. Neither sends.
 - `outlook_send_draft(draft, expected_digest)` submits an inspected draft. Require explicit authorization and pass the exact returned digest.
 - `outlook_archive(message, expected_source)` moves unchanged mail to its existing Archive folder. Require authorization and use the current version.
 

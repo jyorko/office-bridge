@@ -831,7 +831,7 @@
     "/api/actions/desktop-office/outlook-create-reply-draft/run": {
       "post": {
         "summary": "Outlook Create Reply Draft",
-        "description": "Save one plain-text reply draft after checking the source version. Never sends.",
+        "description": "Save an attachment-free, plain-text reply or reply-all draft. Never sends.",
         "operationId": "outlook_create_reply_draft",
         "requestBody": {
           "content": {
@@ -914,6 +914,12 @@
                     ],
                     "title": "Expected Source",
                     "description": "Unchanged version returned by the last mail read."
+                  },
+                  "reply_all": {
+                    "type": "boolean",
+                    "title": "Reply All",
+                    "description": "Include the source message's other recipients when true.",
+                    "default": false
                   }
                 },
                 "type": "object",
