@@ -464,6 +464,168 @@ def test_single_click_and_verified_loaded_history(page):
     assert run(page, "read", 1)["messages"][0]["text"] == "hello"
 
 
+def test_upload_waits_for_ready_files_clicks_once_and_observes_settled_message(page):
+    page.evaluate(
+        """() => {
+          const editor=document.querySelector('[data-tid="ckeditor"]');
+          const send=document.querySelector('[data-tid="newMessageCommands-send"]');
+          const composer=document.createElement('div');
+          composer.id='composer';
+          editor.before(composer);
+          composer.append(editor,send);
+          const input=document.createElement('input');
+          input.type='file';input.accept='.pdf';input.hidden=true;
+          composer.append(input);
+        }"""
+    )
+    files = [{"name": "evaluation.pdf"}]
+
+    def upload(phase):
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)",
+            [
+                SCRIPT,
+                {
+                    "phase": phase,
+                    "chatId": CHAT_ID,
+                    "title": TITLE,
+                    "requestId": "upload-1",
+                    "authorName": "Example User",
+                    "files": files,
+                },
+            ],
+        )
+
+    assert upload("upload_readiness") == {
+        "state": "ready",
+        "chat_id": CHAT_ID,
+        "title": TITLE,
+        "composer_empty": True,
+        "file_input_available": True,
+        "file_input_count": 1,
+        "file_input_accepts": ".pdf",
+        "file_input_mode": "direct",
+        "attach_control_available": False,
+        "reason": None,
+    }
+    assert upload("upload_prepare")["state"] == "upload_prepared"
+    assert upload("upload_wait")["state"] == "waiting"
+    page.evaluate(
+        """() => {
+          const input=document.querySelector('input[type=file]');
+          const transfer=new DataTransfer();
+          transfer.items.add(new File(['fixture'],'evaluation.pdf',{type:'application/pdf'}));
+          input.files=transfer.files;
+          const card=document.createElement('div');
+          card.textContent='evaluation.pdf';
+          document.querySelector('#composer').append(card);
+        }"""
+    )
+    assert upload("upload_wait")["state"] == "upload_ready"
+    assert upload("upload_click")["state"] == "upload_clicked"
+    assert upload("upload_click")["state"] == "draft_changed"
+    assert page.evaluate("window.clicks") == 1
+    page.evaluate(
+        """() => {
+          const row=document.createElement('div');
+          row.innerHTML='<span data-tid="message-author-name">Example User</span>'
+            +'<time datetime="2026-11-17T19:00:00.000Z"></time>'
+            +'<div data-tid="chat-pane-item"><div data-tid="chat-pane-message" '
+            +'data-mid="1794942000000" id="message-body-1794942000000">evaluation.pdf</div></div>';
+          document.body.append(row);
+        }"""
+    )
+    result = upload("upload_observe")
+    assert result == {
+        "state": "uploaded",
+        "chat_id": CHAT_ID,
+        "title": TITLE,
+        "message_id": "message-body-1794942000000",
+        "time": "2026-11-17T19:00:00.000Z",
+        "files": ["evaluation.pdf"],
+    }
+
+
+def test_upload_refuses_preexisting_draft_or_missing_file_input(page):
+    def upload(phase):
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)",
+            [
+                SCRIPT,
+                {
+                    "phase": phase,
+                    "chatId": CHAT_ID,
+                    "title": TITLE,
+                    "requestId": "upload-2",
+                    "files": [{"name": "evaluation.pdf"}],
+                },
+            ],
+        )
+
+    missing = upload("upload_readiness")
+    assert missing["state"] == "blocked"
+    assert missing["reason"] == "file_input_unavailable"
+    assert upload("upload_prepare")["state"] == "attachment_input_unavailable"
+    page.locator('[data-tid="ckeditor"]').fill("existing draft")
+    assert upload("upload_prepare")["state"] == "draft_exists"
+    assert page.evaluate("window.clicks || 0") == 0
+
+
+def test_upload_can_use_an_intercepted_attach_menu_when_input_is_lazy(page):
+    page.evaluate(
+        """() => {
+          const editor=document.querySelector('[data-tid="ckeditor"]');
+          const send=document.querySelector('[data-tid="newMessageCommands-send"]');
+          const composer=document.createElement('div');
+          composer.id='composer';
+          editor.before(composer);
+          composer.append(editor,send);
+          const attach=document.createElement('button');
+          attach.type='button';
+          attach.setAttribute('data-tid','chat-input-attachment-button');
+          attach.setAttribute('aria-label','Attach');
+          attach.onclick=()=>{
+            const menu=document.createElement('div');
+            menu.setAttribute('role','menu');
+            const item=document.createElement('button');
+            item.setAttribute('role','menuitem');
+            item.textContent='Upload from this device';
+            item.onclick=()=>window.pickerItems=(window.pickerItems||0)+1;
+            menu.append(item);
+            composer.append(menu);
+          };
+          composer.append(attach);
+        }"""
+    )
+
+    def upload(phase):
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)",
+            [
+                SCRIPT,
+                {
+                    "phase": phase,
+                    "chatId": CHAT_ID,
+                    "title": TITLE,
+                    "requestId": "upload-menu",
+                    "files": [{"name": "evaluation.pdf"}],
+                },
+            ],
+        )
+
+    readiness = upload("upload_readiness")
+    assert readiness["state"] == "ready"
+    assert readiness["file_input_available"] is False
+    assert readiness["file_input_mode"] == "attach_menu"
+    assert readiness["attach_control_available"] is True
+    prepared = upload("upload_prepare")
+    assert prepared == {"state": "upload_prepared", "input_mode": "attach_menu"}
+    assert upload("upload_open_menu")["state"] == "upload_menu_opened"
+    assert upload("upload_open_picker")["state"] == "upload_picker_opened"
+    assert page.evaluate("window.pickerItems") == 1
+    assert page.evaluate("window.clicks || 0") == 0
+
+
 def test_duplicate_titles_do_not_redirect_to_another_conversation(page):
     page.evaluate(
         """() => {const item=document.querySelector('[role="treeitem"]');const clone=item.cloneNode(true);clone.setAttribute('data-fui-tree-item-value','folder|19:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb@thread.v2');clone.onclick=()=>window.wrong=true;item.before(clone);}"""

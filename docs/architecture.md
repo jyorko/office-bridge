@@ -9,7 +9,7 @@
 ## Implementations
 
 - `office_bridge/desktop.py` invokes fixed, bounded PowerShell JSON-file adapters. The Outlook bridge preserves EntryID/StoreID identity and version checks. Teams desktop navigation refuses to take foreground focus.
-- `office_bridge/teams/service.py` owns background reads and durable send/edit reservations. The existing group SQLite ledger and self-send ledger retain their locations and unknown-outcome behavior. Edit records use a separate table in the group ledger.
+- `office_bridge/teams/service.py` owns background reads and durable send/edit/upload reservations. The existing group SQLite ledger and self-send ledger retain their locations and unknown-outcome behavior. Edit and upload records use separate tables in the group ledger.
 - `office_bridge/teams/formatting.py` converts bounded Markdown to visible text, sanitized HTML, and expected formatting for browser verification.
 - `office_bridge/teams/lookup.py` validates directory search results before exposing exact chat references.
 - `office_bridge/teams/copilot.py` owns Copilot query contracts, private durable reservations, verified result caching, and model-choice validation.

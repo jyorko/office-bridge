@@ -31,6 +31,9 @@ OPERATIONS = frozenset(
         "teams_web_send_chat",
         "teams_web_inspect_message",
         "teams_web_edit_message",
+        "teams_web_upload_readiness",
+        "teams_web_upload_files",
+        "teams_web_upload_status",
         "teams_web_message_link",
         "teams_web_message_reactions",
         "teams_web_react_message",
@@ -46,6 +49,7 @@ MUTATIONS = frozenset(
         "download_attachments",
         "teams_web_send_chat",
         "teams_web_edit_message",
+        "teams_web_upload_files",
         "teams_web_react_message",
         "teams_web_set_reaction",
     }
@@ -73,6 +77,9 @@ def invoke(operation: str, arguments: dict) -> dict:
         "teams_web_send_chat",
         "teams_web_inspect_message",
         "teams_web_edit_message",
+        "teams_web_upload_readiness",
+        "teams_web_upload_files",
+        "teams_web_upload_status",
         "teams_web_message_link",
         "teams_web_message_reactions",
         "teams_web_react_message",
@@ -82,7 +89,8 @@ def invoke(operation: str, arguments: dict) -> dict:
         from office_bridge.teams.session import invoke as invoke_session
 
         try:
-            return invoke_session(operation, arguments, timeout=90)
+            timeout = 300 if operation == "teams_web_upload_files" else 90
+            return invoke_session(operation, arguments, timeout=timeout)
         except SessionError as error:
             raise BridgeError(
                 "mutation_outcome_unknown" if operation in MUTATIONS else error.args[0]

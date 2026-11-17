@@ -11,6 +11,9 @@ from office_bridge.teams.models import (
     EditReceipt,
     GroupReceipt,
     TeamsWebStatus,
+    UploadReadiness,
+    UploadReceipt,
+    UploadStatus,
     WebChatHistory,
     WebChatRef,
     WebChatSearchResult,
@@ -136,6 +139,56 @@ def teams_web_edit_message(
         request_id,
         body_format,
     )
+
+
+@action(is_consequential=False)
+def teams_web_upload_readiness(chat: WebChatRef) -> Response[UploadReadiness]:
+    """Inspect upload support for one exact chat without changing its composer.
+
+    Args:
+        chat: Exact chat reference returned by teams_web_find_chats or teams_web_list_chats.
+    """
+    return _respond(service.upload_readiness, chat)
+
+
+@action(is_consequential=True)
+def teams_web_upload_files(
+    chat: WebChatRef,
+    file_paths: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=32767)]],
+        Field(min_length=1, max_length=10),
+    ],
+    request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+) -> Response[UploadReceipt]:
+    """Upload 1 to 10 bounded local files to one verified Teams chat at most once.
+
+    Files must be absolute local regular files with unique safe names, no larger
+    than 25 MiB each or 50 MiB total. Existing composer drafts or attachments
+    block the upload. An uncertain result is never replayed.
+
+    Args:
+        chat: Exact chat reference returned by teams_web_find_chats or teams_web_list_chats.
+        file_paths: Absolute local file paths; paths are not retained in the ledger.
+        request_id: Unique upload ID; uncertain outcomes require status reconciliation.
+    """
+    return _respond(service.upload_files, chat, file_paths, request_id)
+
+
+@action(is_consequential=False)
+def teams_web_upload_status(
+    chat: WebChatRef,
+    request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+) -> Response[UploadStatus]:
+    """Reconcile a prior upload receipt without clicking or retrying it.
+
+    If no durable settled receipt exists, inspect the exact chat manually before
+    considering any next step. The action never submits files.
+
+    Args:
+        chat: The same exact chat reference originally used for the upload.
+        request_id: Exact upload ID to reconcile.
+    """
+    return _respond(service.upload_status, chat, request_id)
 
 
 @action(is_consequential=False)
