@@ -400,6 +400,77 @@ def check_edit_reservation() -> int:
     return 1
 
 
+def check_upload_reservation() -> int:
+    from office_bridge.teams import service
+    from office_bridge.teams.models import WebChatRef
+    from office_bridge.teams.service import TeamsError
+
+    chat = WebChatRef(chat_id=CHAT_ID, title=CHAT_TITLE)
+    checks = 0
+    for native_status, expected in (
+        ({"state": "unknown"}, "outcome_unknown"),
+        (
+            {
+                "state": "uploaded",
+                "chat_id": CHAT_ID,
+                "title": CHAT_TITLE,
+                "message_id": MESSAGE_ID,
+                "time": "2026-11-17T15:00:00Z",
+                "files": ["fixture.pdf"],
+            },
+            "uploaded",
+        ),
+    ):
+        with ExitStack() as stack:
+            root = _isolated_localapp(stack)
+            file_path = root / "fixture.pdf"
+            file_path.write_bytes(b"synthetic attachment")
+            calls: list[str] = []
+
+            def invoke(operation, _arguments):
+                calls.append(operation)
+                if operation == "teams_web_upload_readiness":
+                    return {
+                        "state": "ready",
+                        "chat_id": CHAT_ID,
+                        "title": CHAT_TITLE,
+                        "composer_empty": True,
+                        "file_input_available": True,
+                        "file_input_count": 1,
+                        "file_input_accepts": ".pdf",
+                    }
+                if operation == "teams_web_upload_files":
+                    raise SimulatedProcessLoss()
+                if operation == "teams_web_upload_status":
+                    return native_status
+                raise AssertionError(operation)
+
+            stack.enter_context(patch.object(service.desktop, "invoke", invoke))
+            try:
+                service.upload_files(chat, [str(file_path)], "upload-a")
+            except SimulatedProcessLoss:
+                pass
+            else:
+                raise AssertionError("did not simulate process loss after upload reservation")
+
+            try:
+                service.upload_files(chat, [str(file_path)], "upload-a")
+            except TeamsError:
+                pass
+            else:
+                raise AssertionError("reserved upload was automatically replayed")
+            assert calls.count("teams_web_upload_files") == 1
+            status = service.upload_status(chat, "upload-a")
+            assert status.status == expected
+            assert calls.count("teams_web_upload_files") == 1
+            assert calls.count("teams_web_upload_status") == 1
+            if expected == "uploaded":
+                assert status.receipt is not None
+                assert status.receipt.files == ["fixture.pdf"]
+            checks += 1
+    return checks
+
+
 def check_copilot_reservation() -> int:
     from office_bridge.teams import copilot
     from office_bridge.teams.copilot import CopilotError
@@ -465,11 +536,13 @@ def main() -> int:
     crash_checks = check_pending_crashes()
     send_checks = check_send_ledger()
     edit_checks = check_edit_reservation()
+    upload_checks = check_upload_reservation()
     copilot_checks = check_copilot_reservation()
     print(
         "PASS bounded real-code exploration: "
         f"{work_cases} work-tracking paths, {crash_checks} Eyes crash checks, "
         f"{send_checks} send-ledger checks, {edit_checks} edit-reservation check, "
+        f"{upload_checks} upload-reservation/reconciliation checks, "
         f"{copilot_checks} Copilot-reservation check"
     )
     print("Bounds: two work claims; all 6 begin/finish orders; all three Eyes baselines.")

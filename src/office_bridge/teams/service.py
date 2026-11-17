@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 from pathlib import Path
 
 from office_bridge import desktop
@@ -13,6 +14,9 @@ from office_bridge.teams.formatting import BodyFormatError, PreparedBody, format
 from office_bridge.teams.models import (
     EditReceipt,
     GroupReceipt,
+    UploadReadiness,
+    UploadReceipt,
+    UploadStatus,
     WebChatHistory,
     WebChatMessage,
     WebChatRef,
@@ -25,6 +29,140 @@ class TeamsError(RuntimeError):
 
 
 _MESSAGE_ID = re.compile(r"^message-body-[0-9]{13}$")
+_UPLOAD_NAME = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]{1,180}$')
+_UPLOAD_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+_MAX_UPLOAD_FILES = 10
+_MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024
+_MAX_UPLOAD_TOTAL_BYTES = 50 * 1024 * 1024
+
+
+def _upload_files(file_paths: list[str]) -> list[dict]:
+    """Validate bounded local files and bind the request to their content hashes."""
+    if not isinstance(file_paths, list) or not 1 <= len(file_paths) <= _MAX_UPLOAD_FILES:
+        raise TeamsError("Attach between 1 and 10 local files.")
+    files = []
+    total = 0
+    names: set[str] = set()
+    for raw_path in file_paths:
+        if (
+            not isinstance(raw_path, str)
+            or not raw_path
+            or len(raw_path) > 32767
+            or "\x00" in raw_path
+            or raw_path.startswith(("\\\\", "//", "\\\\?\\", "\\\\.\\"))
+        ):
+            raise TeamsError("A file path is invalid; use an absolute local file path.")
+        path = Path(raw_path)
+        if not path.is_absolute():
+            raise TeamsError("A file path is invalid; use an absolute local file path.")
+        try:
+            if path.is_symlink():
+                raise TeamsError("Symbolic-link files cannot be attached.")
+            resolved = path.resolve(strict=True)
+            metadata = resolved.stat()
+        except TeamsError:
+            raise
+        except (OSError, RuntimeError, ValueError):
+            raise TeamsError("A local file could not be opened safely.") from None
+        attributes = getattr(metadata, "st_file_attributes", 0)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or (attributes & 0x400) != 0
+            or (os.name == "nt" and (not resolved.drive or resolved.drive.startswith("\\\\")))
+        ):
+            raise TeamsError("Each attachment must be a regular local file.")
+        name = resolved.name
+        base_name = name.split(".", 1)[0].rstrip(" .").upper()
+        if (
+            not _UPLOAD_NAME.fullmatch(name)
+            or name.endswith((".", " "))
+            or base_name in _UPLOAD_RESERVED_NAMES
+            or name in {".", ".."}
+        ):
+            raise TeamsError("A file name is not safe to attach.")
+        folded = name.casefold()
+        if folded in names:
+            raise TeamsError("Attachment file names must be unique.")
+        names.add(folded)
+        size = metadata.st_size
+        modified_ns = getattr(metadata, "st_mtime_ns", None)
+        total += size
+        if size < 0 or size > _MAX_UPLOAD_FILE_BYTES or total > _MAX_UPLOAD_TOTAL_BYTES:
+            raise TeamsError("Attachments exceed the 25 MiB per-file or 50 MiB total limit.")
+        digest = hashlib.sha256()
+        try:
+            with resolved.open("rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if not stat.S_ISREG(opened.st_mode) or opened.st_size != size:
+                    raise TeamsError("A local file changed while it was being checked.")
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                after = os.fstat(stream.fileno())
+            current = resolved.stat()
+        except TeamsError:
+            raise
+        except OSError:
+            raise TeamsError("A local file could not be read safely.") from None
+        if (
+            after.st_size != size
+            or current.st_size != size
+            or getattr(after, "st_mtime_ns", None) != modified_ns
+            or getattr(current, "st_mtime_ns", None) != modified_ns
+            or getattr(current, "st_ino", None) != getattr(metadata, "st_ino", None)
+        ):
+            raise TeamsError("A local file changed while it was being checked.")
+        files.append(
+            {
+                "path": str(resolved),
+                "name": name,
+                "size_bytes": size,
+                "sha256": digest.hexdigest(),
+            }
+        )
+    return files
+
+
+def _upload_path() -> Path:
+    return (
+        Path(os.environ["LOCALAPPDATA"])
+        / "OfficeActionServer"
+        / "teams-web-sends"
+        / "group.sqlite3"
+    )
+
+
+def _ensure_upload_table(db: sqlite3.Connection) -> None:
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS uploads (
+            id TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            chat_title TEXT NOT NULL,
+            digest TEXT NOT NULL,
+            state TEXT NOT NULL,
+            file_count INTEGER NOT NULL,
+            receipt TEXT
+        )"""
+    )
+
+
+def _upload_digest(chat: WebChatRef, files: list[dict]) -> str:
+    data = {
+        "chat": chat.model_dump(mode="json"),
+        "files": [
+            {"name": item["name"], "size_bytes": item["size_bytes"], "sha256": item["sha256"]}
+            for item in files
+        ],
+    }
+    return hashlib.sha256(
+        json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _rich_identity(source: str, body_format: str, prepared: PreparedBody) -> str:
@@ -340,3 +478,224 @@ def edit_chat(
         return receipt
     except Exception:
         raise TeamsError("Edit outcome unknown; inspect the chat before retrying.") from None
+
+
+def upload_readiness(chat: WebChatRef) -> UploadReadiness:
+    """Inspect the exact chat's hidden composer without changing its draft."""
+    try:
+        result = desktop.invoke(
+            "teams_web_upload_readiness", {"chat": chat.model_dump(mode="json")}
+        )
+        if (
+            not isinstance(result, dict)
+            or result.get("chat_id") != chat.chat_id
+            or result.get("title") != chat.title
+        ):
+            raise ValueError("chat identity mismatch")
+        return UploadReadiness.model_validate({**result, "chat": chat})
+    except desktop.BridgeError as error:
+        raise TeamsError(f"Could not inspect Teams file-upload readiness: {error.code}.") from None
+    except (KeyError, ValueError):
+        raise TeamsError("Could not verify Teams file-upload readiness.") from None
+
+
+def _cached_upload(row: tuple, chat: WebChatRef, digest: str) -> UploadReceipt:
+    if row[:3] != (chat.chat_id, chat.title, digest):
+        raise TeamsError("Upload request ID conflicts with a prior destination or file set.")
+    if row[3] != "uploaded" or not row[4]:
+        raise TeamsError(
+            "Upload outcome is unknown; use teams_web_upload_status and inspect the chat before retrying."
+        )
+    try:
+        receipt = UploadReceipt.model_validate_json(row[4])
+    except ValueError:
+        raise TeamsError(
+            "Cached upload receipt is invalid; inspect the chat before retrying."
+        ) from None
+    if receipt.chat != chat:
+        raise TeamsError("Cached upload receipt does not match the requested chat.")
+    return receipt.model_copy(update={"status": "already_uploaded"})
+
+
+def _record_upload_receipt(
+    path: Path, request_id: str, chat: WebChatRef, result: dict, expected_names: list[str]
+) -> UploadReceipt:
+    if (
+        not isinstance(result, dict)
+        or result.get("state") != "uploaded"
+        or result.get("chat_id") != chat.chat_id
+        or result.get("title") != chat.title
+        or not isinstance(result.get("message_id"), str)
+        or not _MESSAGE_ID.fullmatch(result["message_id"])
+        or not isinstance(result.get("time"), str)
+        or not result.get("time")
+        or result.get("files") != expected_names
+    ):
+        raise ValueError("unverified upload receipt")
+    receipt = UploadReceipt(
+        status="uploaded",
+        chat=chat,
+        message_id=result["message_id"],
+        time=result["time"],
+        files=expected_names,
+    )
+    with sqlite3.connect(path, timeout=3) as db:
+        changed = db.execute(
+            "UPDATE uploads SET state='uploaded',receipt=? WHERE id=? AND state='reserved'",
+            (receipt.model_dump_json(), request_id),
+        ).rowcount
+        if changed != 1:
+            raise ValueError("upload reservation missing")
+    return receipt
+
+
+def upload_files(chat: WebChatRef, file_paths: list[str], request_id: str) -> UploadReceipt:
+    """Upload a bounded local file set once to one verified Teams chat."""
+    if not isinstance(request_id, str) or not re.fullmatch(r"^[A-Za-z0-9._-]{1,128}$", request_id):
+        raise TeamsError("Upload request ID is invalid.")
+    try:
+        if ledger.has_request_id(request_id):
+            raise TeamsError("Request ID exists in the retired send ledger; do not reuse it.")
+    except ledger.SendLedgerError:
+        raise TeamsError("Could not safely check prior send history.") from None
+
+    files = _upload_files(file_paths)
+    digest = _upload_digest(chat, files)
+    path = _upload_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.exists():
+            with sqlite3.connect(path, timeout=3) as db:
+                table = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='uploads'"
+                ).fetchone()
+                old = (
+                    db.execute(
+                        "SELECT chat_id,chat_title,digest,state,receipt FROM uploads WHERE id=?",
+                        (request_id,),
+                    ).fetchone()
+                    if table
+                    else None
+                )
+            if old:
+                return _cached_upload(old, chat, digest)
+    except TeamsError:
+        raise
+    except sqlite3.Error:
+        raise TeamsError("Could not safely check prior upload history.") from None
+
+    ready = upload_readiness(chat)
+    if ready.state != "ready":
+        raise TeamsError(
+            "Teams is not ready for an upload; the existing composer was left unchanged."
+        )
+    try:
+        with sqlite3.connect(path, timeout=3) as db:
+            _ensure_upload_table(db)
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                "SELECT chat_id,chat_title,digest,state,receipt FROM uploads WHERE id=?",
+                (request_id,),
+            ).fetchone()
+            if old:
+                return _cached_upload(old, chat, digest)
+            db.execute(
+                "INSERT INTO uploads(id,chat_id,chat_title,digest,state,file_count,receipt) "
+                "VALUES (?,?,?,?, 'reserved', ?, NULL)",
+                (request_id, chat.chat_id, chat.title, digest, len(files)),
+            )
+            db.commit()
+    except TeamsError:
+        raise
+    except sqlite3.Error:
+        raise TeamsError("Could not reserve the Teams upload safely.") from None
+
+    try:
+        result = desktop.invoke(
+            "teams_web_upload_files",
+            {
+                "chat": chat.model_dump(mode="json"),
+                "files": files,
+                "request_id": request_id,
+            },
+        )
+        return _record_upload_receipt(
+            path, request_id, chat, result, [item["name"] for item in files]
+        )
+    except Exception:
+        raise TeamsError(
+            "Upload outcome unknown; use teams_web_upload_status and inspect the chat before retrying."
+        ) from None
+
+
+def upload_status(chat: WebChatRef, request_id: str) -> UploadStatus:
+    """Reconcile a durable upload receipt without clicking or replaying."""
+    if not isinstance(request_id, str) or not re.fullmatch(r"^[A-Za-z0-9._-]{1,128}$", request_id):
+        raise TeamsError("Upload request ID is invalid.")
+    path = _upload_path()
+    if not path.exists():
+        return UploadStatus(status="not_found", chat=chat, request_id=request_id, file_count=0)
+    try:
+        with sqlite3.connect(path, timeout=3) as db:
+            table = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='uploads'"
+            ).fetchone()
+            row = (
+                db.execute(
+                    "SELECT chat_id,chat_title,digest,state,file_count,receipt "
+                    "FROM uploads WHERE id=?",
+                    (request_id,),
+                ).fetchone()
+                if table
+                else None
+            )
+    except sqlite3.Error:
+        raise TeamsError("Could not safely read upload history.") from None
+    if not row:
+        return UploadStatus(status="not_found", chat=chat, request_id=request_id, file_count=0)
+    if (row[0], row[1]) != (chat.chat_id, chat.title):
+        raise TeamsError("Upload request ID belongs to a different chat.")
+    if row[3] == "uploaded":
+        try:
+            receipt = UploadReceipt.model_validate_json(row[5])
+        except (TypeError, ValueError):
+            raise TeamsError(
+                "Cached upload receipt is invalid; inspect the chat manually."
+            ) from None
+        return UploadStatus(
+            status="uploaded",
+            chat=chat,
+            request_id=request_id,
+            file_count=row[4],
+            receipt=receipt,
+        )
+
+    # The host receipt closes the crash window after Teams settled the
+    # attachment but before Python updated its database. No status check clicks.
+    try:
+        native = desktop.invoke(
+            "teams_web_upload_status",
+            {"chat": chat.model_dump(mode="json"), "request_id": request_id},
+        )
+    except Exception:
+        native = {}
+    if isinstance(native, dict) and native.get("state") == "uploaded":
+        try:
+            receipt = _record_upload_receipt(
+                path, request_id, chat, native, expected_names=native.get("files", [])
+            )
+            return UploadStatus(
+                status="uploaded",
+                chat=chat,
+                request_id=request_id,
+                file_count=row[4],
+                receipt=receipt,
+            )
+        except (TeamsError, ValueError, sqlite3.Error):
+            pass
+    return UploadStatus(
+        status="outcome_unknown",
+        chat=chat,
+        request_id=request_id,
+        file_count=row[4],
+    )

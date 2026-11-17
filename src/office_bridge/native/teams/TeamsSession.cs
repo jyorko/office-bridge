@@ -506,9 +506,29 @@ public sealed class TeamsSession : ApplicationContext
             return [a>>>0,b>>>0,value.length].join(':');
           };
           const editors=Array.from(document.querySelectorAll('[data-tid=ckeditor][contenteditable=true]'));
-          const hasDraft=e => (e.innerText||'').replace(/\n/g,'').trim().length>0 ||
-            !!e.querySelector('img,video,table,iframe,object,a') ||
-            e.querySelectorAll('p').length>1 || e.querySelectorAll('br').length>1;
+          const hasDraft=e => {
+            const text=(e.innerText||'').replace(/\n/g,'').trim().length>0;
+            const rich=!!e.querySelector('img,video,table,iframe,object,a') ||
+              e.querySelectorAll('p').length>1 || e.querySelectorAll('br').length>1;
+            let root=e;
+            const send='button[data-tid=""newMessageCommands-send""],button[data-tid=""sendMessageCommands-send""]';
+            for(let i=0;root&&i<12;i++){
+              if(root===document.body||root===document.documentElement){root=null;break;}
+              if(root.querySelector(send))break;
+              root=root.parentElement;
+            }
+            const files=Array.from(document.querySelectorAll('input[type=file]'))
+              .some(input=>input.files?.length);
+            if(!root)return text||rich||files;
+            const clone=root.cloneNode(true);
+            clone.querySelectorAll('[data-tid=""ckeditor""],[contenteditable=true],button,[role=button],input')
+              .forEach(element=>element.remove());
+            const attachmentText=(clone.innerText||clone.textContent||'').replace(/\s+/g,' ').trim();
+            const namedFile=/(?:^|\s)\S{1,180}\.[A-Za-z0-9]{1,16}(?:$|\s)/i
+              .test(attachmentText);
+            const uploading=!!root.querySelector('[role=progressbar],[aria-busy=true],[data-tid*=upload-progress],[data-tid*=file-progress]');
+            return text||rich||files||namedFile||uploading;
+          };
           const title=document.querySelector('[data-tid=chat-title]');
           return JSON.stringify({href:location.href, title:title?.textContent.trim()||'',
             headerId:title?.closest('[id^=chat-header-]')?.id||'',
@@ -1053,6 +1073,25 @@ public sealed class TeamsSession : ApplicationContext
         string op = Convert.ToString(operation);
         if (op == "teams_web_status")
             return await Status();
+        if (op == "teams_web_upload_status")
+        {
+            object raw;
+            if (!request.TryGetValue("arguments", out raw) ||
+                !(raw is Dictionary<string, object>))
+                throw new InvalidDataException();
+            return UploadStatus((Dictionary<string, object>)raw);
+        }
+        if (op == "teams_web_upload_readiness" || op == "teams_web_upload_files")
+        {
+            object raw;
+            if (!request.TryGetValue("arguments", out raw) ||
+                !(raw is Dictionary<string, object>))
+                throw new InvalidDataException();
+            var args = (Dictionary<string, object>)raw;
+            if (op == "teams_web_upload_readiness")
+                return await UploadReadiness(args);
+            return await UploadFiles(args);
+        }
         if (op == "teams_copilot_status" || op == "teams_copilot_models" ||
             op == "teams_copilot_ask" || op == "teams_copilot_read")
         {
@@ -1218,6 +1257,425 @@ public sealed class TeamsSession : ApplicationContext
             await Task.Delay(150);
         }
         throw new TimeoutException();
+    }
+    static string Sha256Text(string value)
+    {
+        using (var sha = SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value)))
+                .Replace("-", "").ToLowerInvariant();
+    }
+    static string UploadPayloadDigest(List<Dictionary<string, object>> files)
+    {
+        return Sha256Text(Json.Serialize(files.ConvertAll(file =>
+            new Dictionary<string, object> {
+                { "name", file["name"] }, { "size_bytes", file["size_bytes"] },
+                { "sha256", file["sha256"] }
+            })));
+    }
+    static Dictionary<string, object> UploadChat(Dictionary<string, object> args)
+    {
+        object raw;
+        if (args == null || !args.TryGetValue("chat", out raw))
+            throw new InvalidDataException();
+        var chat = raw as Dictionary<string, object>;
+        if (chat == null || !chat.ContainsKey("chat_id") || !chat.ContainsKey("title"))
+            throw new InvalidDataException();
+        string chatId = chat["chat_id"] as string, title = chat["title"] as string;
+        if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120)
+            throw new InvalidDataException();
+        return chat;
+    }
+    static List<Dictionary<string, object>> ValidateUploadFiles(object raw)
+    {
+        var values = raw as System.Collections.IList;
+        if (values == null || values.Count < 1 || values.Count > 10)
+            throw new InvalidOperationException("attachment_limit_exceeded");
+        var result = new List<Dictionary<string, object>>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long total = 0;
+        foreach (object value in values)
+        {
+            var file = value as Dictionary<string, object>;
+            object rawPath, rawName, rawSize, rawHash;
+            if (file == null || !file.TryGetValue("path", out rawPath) ||
+                !file.TryGetValue("name", out rawName) ||
+                !file.TryGetValue("size_bytes", out rawSize) ||
+                !file.TryGetValue("sha256", out rawHash))
+                throw new InvalidDataException();
+            string path = rawPath as string, name = rawName as string, digest = rawHash as string;
+            long size;
+            try { size = Convert.ToInt64(rawSize); }
+            catch { throw new InvalidDataException(); }
+            if (String.IsNullOrWhiteSpace(path) || path.Length > 32767 ||
+                !Path.IsPathRooted(path) || path.StartsWith(@"\\", StringComparison.Ordinal) ||
+                path.StartsWith(@"\\?\", StringComparison.Ordinal) ||
+                path.StartsWith(@"\\.\", StringComparison.Ordinal) ||
+                Path.GetPathRoot(path).Length < 3 ||
+                String.IsNullOrEmpty(name) || Path.GetFileName(path) != name ||
+                !Regex.IsMatch(name, @"^[^\\/:*?""<>|\x00-\x1f]{1,180}$") ||
+                name.EndsWith(".", StringComparison.Ordinal) ||
+                name.EndsWith(" ", StringComparison.Ordinal) ||
+                !Regex.IsMatch(digest ?? "", "^[0-9a-f]{64}$") ||
+                size < 0 || size > 25L * 1024 * 1024 ||
+                !names.Add(name))
+                throw new InvalidOperationException("attachment_limit_exceeded");
+            string baseName = Path.GetFileNameWithoutExtension(name).TrimEnd(' ', '.').ToUpperInvariant();
+            if (baseName == "CON" || baseName == "PRN" || baseName == "AUX" || baseName == "NUL" ||
+                Regex.IsMatch(baseName, "^(COM|LPT)[1-9]$"))
+                throw new InvalidOperationException("attachment_limit_exceeded");
+            total += size;
+            if (total > 50L * 1024 * 1024)
+                throw new InvalidOperationException("attachment_limit_exceeded");
+            try
+            {
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.Directory) != 0 ||
+                    (attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("attachment_file_changed");
+                var info = new FileInfo(path);
+                if (info.Length != size)
+                    throw new InvalidOperationException("attachment_file_changed");
+                string actual;
+                using (var sha = SHA256.Create())
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+                if (actual != digest || new FileInfo(path).Length != size)
+                    throw new InvalidOperationException("attachment_file_changed");
+            }
+            catch (InvalidOperationException) { throw; }
+            catch { throw new InvalidOperationException("attachment_file_changed"); }
+            result.Add(new Dictionary<string, object> {
+                { "path", Path.GetFullPath(path) }, { "name", name },
+                { "size_bytes", size }, { "sha256", digest }
+            });
+        }
+        return result;
+    }
+    string UploadClaimsDirectory()
+    {
+        string path = Path.Combine(Path.GetDirectoryName(profile), "teams-web-sends",
+                                   "claims", "uploads");
+        Directory.CreateDirectory(path);
+        return path;
+    }
+    Dictionary<string, object> UploadStatus(Dictionary<string, object> args)
+    {
+        var chat = UploadChat(args);
+        object rawId;
+        if (!args.TryGetValue("request_id", out rawId) || !(rawId is string))
+            throw new InvalidDataException();
+        string requestId = (string)rawId;
+        if (!Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$"))
+            throw new InvalidDataException();
+        string requestDigest = Sha256Text(requestId);
+        string destinationDigest = Sha256Text(Convert.ToString(chat["chat_id"]) + "\0" +
+                                                Convert.ToString(chat["title"]));
+        string claim = Path.Combine(UploadClaimsDirectory(), requestDigest + ".json");
+        string chatId = Convert.ToString(chat["chat_id"]), title = Convert.ToString(chat["title"]);
+        var unknown = new Dictionary<string, object> {
+            { "state", "unknown" }, { "chat_id", chatId }, { "title", title },
+            { "request_id", requestId }
+        };
+        if (!File.Exists(claim)) return unknown;
+        try
+        {
+            var record = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(claim));
+            if (record == null || Convert.ToString(record["request_sha256"]) != requestDigest ||
+                Convert.ToString(record["destination_sha256"]) != destinationDigest)
+                return unknown;
+            string receiptPath = claim + ".receipt";
+            if (!File.Exists(receiptPath)) return unknown;
+            var receipt = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(receiptPath));
+            if (receipt == null || Convert.ToString(receipt["state"]) != "uploaded" ||
+                Convert.ToString(receipt["chat_id"]) != chatId ||
+                Convert.ToString(receipt["title"]) != title)
+                return unknown;
+            return receipt;
+        }
+        catch { return unknown; }
+    }
+    async Task<List<int>> QueryUploadInputNodeIds(CoreWebView2 core)
+    {
+        await core.CallDevToolsProtocolMethodAsync("DOM.enable", "{}");
+        string documentRaw = await core.CallDevToolsProtocolMethodAsync(
+            "DOM.getDocument", "{\"depth\":1,\"pierce\":true}");
+        var document = Json.Deserialize<Dictionary<string, object>>(documentRaw);
+        var root = document == null ? null : document["root"] as Dictionary<string, object>;
+        if (root == null || !root.ContainsKey("nodeId"))
+            throw new InvalidOperationException("attachment_input_unavailable");
+        string queryRaw = await core.CallDevToolsProtocolMethodAsync(
+            "DOM.querySelectorAll", Json.Serialize(new Dictionary<string, object> {
+                { "nodeId", Convert.ToInt32(root["nodeId"]) }, { "selector", "input[type=file]" }
+            }));
+        var query = Json.Deserialize<Dictionary<string, object>>(queryRaw);
+        var nodes = query == null ? null : query["nodeIds"] as System.Collections.IList;
+        if (nodes == null)
+            throw new InvalidOperationException("attachment_input_unavailable");
+        var result = new List<int>();
+        foreach (object node in nodes)
+            result.Add(Convert.ToInt32(node));
+        return result;
+    }
+    async Task SetFileChooserInterception(CoreWebView2 core, bool enabled)
+    {
+        await core.CallDevToolsProtocolMethodAsync("Page.enable", "{}");
+        await core.CallDevToolsProtocolMethodAsync("Page.setInterceptFileChooserDialog",
+            Json.Serialize(new Dictionary<string, object> { { "enabled", enabled } }));
+    }
+    async Task<Dictionary<string, object>> UploadReadiness(Dictionary<string, object> args)
+    {
+        var chat = UploadChat(args);
+        var context = await BeginCrossChat();
+        string author = currentAccountName;
+        await Read(new Dictionary<string, object> {
+            { "chat", chat }, { "limit", 1 }
+        }, context);
+        var result = await RunChat(context.Core, new Dictionary<string, object> {
+            { "phase", "upload_readiness" }, { "chatId", chat["chat_id"] },
+            { "title", chat["title"] }
+        });
+        if (Convert.ToString(result["chat_id"]) != Convert.ToString(chat["chat_id"]) ||
+            Convert.ToString(result["title"]) != Convert.ToString(chat["title"]))
+            throw new InvalidOperationException("identity_failed");
+        bool chooserInterception = false;
+        try
+        {
+            await SetFileChooserInterception(context.Core, true);
+            await SetFileChooserInterception(context.Core, false);
+            chooserInterception = true;
+        }
+        catch { }
+        if (!chooserInterception)
+        {
+            try { await SetFileChooserInterception(context.Core, false); }
+            catch { }
+        }
+        bool composerEmpty = Flag(result, "composer_empty");
+        bool directInput = Flag(result, "file_input_available");
+        bool attachControl = Flag(result, "attach_control_available");
+        bool usable = directInput || (attachControl && chooserInterception);
+        result["file_chooser_interception_available"] = chooserInterception;
+        result["file_input_available"] = usable;
+        result["file_input_mode"] = directInput ? "direct" :
+            usable ? "attach_menu" : "unavailable";
+        if (!composerEmpty)
+        {
+            result["state"] = "blocked";
+            result["reason"] = "composer_has_draft";
+        }
+        else if (!usable)
+        {
+            result["state"] = "blocked";
+            result["reason"] = "file_input_unavailable";
+        }
+        else
+        {
+            result["state"] = "ready";
+            result["reason"] = null;
+        }
+        result["attach_control_available"] = attachControl;
+        await VerifyCrossChat(context, author);
+        return result;
+    }
+    async Task<Dictionary<string, object>> UploadFiles(Dictionary<string, object> args)
+    {
+        var chat = UploadChat(args);
+        object rawId, rawFiles;
+        if (!args.TryGetValue("request_id", out rawId) || !(rawId is string) ||
+            !args.TryGetValue("files", out rawFiles))
+            throw new InvalidDataException();
+        string requestId = (string)rawId;
+        if (!Regex.IsMatch(requestId, "^[A-Za-z0-9._-]{1,128}$"))
+            throw new InvalidDataException();
+        var files = ValidateUploadFiles(rawFiles);
+        string chatId = Convert.ToString(chat["chat_id"]), title = Convert.ToString(chat["title"]);
+        string requestDigest = Sha256Text(requestId);
+        string destinationDigest = Sha256Text(chatId + "\0" + title);
+        string payloadDigest = UploadPayloadDigest(files);
+        string claim = Path.Combine(UploadClaimsDirectory(), requestDigest + ".json");
+        string receiptPath = claim + ".receipt";
+        if (File.Exists(claim))
+        {
+            try
+            {
+                var previous = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(claim));
+                if (previous == null ||
+                    Convert.ToString(previous["request_sha256"]) != requestDigest ||
+                    Convert.ToString(previous["destination_sha256"]) != destinationDigest ||
+                    Convert.ToString(previous["payload_sha256"]) != payloadDigest)
+                    throw new InvalidOperationException("idempotency_conflict");
+            }
+            catch (InvalidOperationException) { throw; }
+            catch { throw new InvalidOperationException("upload_outcome_unknown"); }
+            var prior = UploadStatus(args);
+            if (Convert.ToString(prior["state"]) == "uploaded")
+                return prior;
+            throw new InvalidOperationException("upload_outcome_unknown");
+        }
+
+        var context = await BeginCrossChat();
+        string author = currentAccountName;
+        if (context.ProtectPrimary)
+            await OpenExactChatOnAuxiliary(context.Core, chatId, title);
+        await Read(new Dictionary<string, object> { { "chat", chat }, { "limit", 1 } }, context);
+        var request = new Dictionary<string, object> {
+            { "phase", "upload_prepare" }, { "chatId", chatId }, { "title", title },
+            { "requestId", requestId }, { "authorName", author },
+            { "files", files.ConvertAll(file => new Dictionary<string, object> {
+                { "name", file["name"] }
+            }) }, { "navigationId", Guid.NewGuid().ToString("N") }
+        };
+        var prepared = await RunChat(context.Core, request);
+        if (Convert.ToString(prepared["state"]) != "upload_prepared")
+            throw new InvalidOperationException(Convert.ToString(prepared["state"]));
+
+        using (var file = new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(
+                new Dictionary<string, object> {
+                    { "request_sha256", requestDigest },
+                    { "destination_sha256", destinationDigest },
+                    { "payload_sha256", payloadDigest }
+                }));
+            file.Write(bytes, 0, bytes.Length);
+            file.Flush(true);
+        }
+
+        string inputMode = Convert.ToString(prepared["input_mode"]);
+        if (inputMode != "direct" && inputMode != "attach_menu")
+            throw new InvalidOperationException("attachment_input_unavailable");
+        var baselineInputs = await QueryUploadInputNodeIds(context.Core);
+        int fileInputNodeId = -1;
+        bool fileChooserIntercepted = false;
+        Exception inputError = null;
+        try
+        {
+            if (inputMode == "direct")
+            {
+                if (baselineInputs.Count != 1)
+                    throw new InvalidOperationException("attachment_input_unavailable");
+                fileInputNodeId = baselineInputs[0];
+            }
+            else
+            {
+                await SetFileChooserInterception(context.Core, true);
+                fileChooserIntercepted = true;
+                request["phase"] = "upload_open_menu";
+                var menu = await RunChat(context.Core, request);
+                if (Convert.ToString(menu["state"]) != "upload_menu_opened")
+                    throw new InvalidOperationException("attachment_input_unavailable");
+                request["phase"] = "upload_open_picker";
+                var pickerDeadline = DateTime.UtcNow.AddSeconds(8);
+                Dictionary<string, object> picker = null;
+                while (DateTime.UtcNow < pickerDeadline)
+                {
+                    picker = await RunChat(context.Core, request);
+                    string pickerState = Convert.ToString(picker["state"]);
+                    if (pickerState == "upload_picker_opened") break;
+                    if (pickerState != "waiting")
+                        throw new InvalidOperationException("attachment_input_unavailable");
+                    await Task.Delay(150);
+                }
+                if (picker == null || Convert.ToString(picker["state"]) != "upload_picker_opened")
+                    throw new InvalidOperationException("attachment_input_unavailable");
+                var inputDeadline = DateTime.UtcNow.AddSeconds(5);
+                while (DateTime.UtcNow < inputDeadline)
+                {
+                    var currentInputs = await QueryUploadInputNodeIds(context.Core);
+                    var createdInputs = currentInputs.FindAll(node => !baselineInputs.Contains(node));
+                    if (createdInputs.Count == 1)
+                    {
+                        fileInputNodeId = createdInputs[0];
+                        break;
+                    }
+                    await Task.Delay(100);
+                }
+                if (fileInputNodeId < 0)
+                    throw new InvalidOperationException("attachment_input_unavailable");
+            }
+            var verifiedFiles = ValidateUploadFiles(rawFiles);
+            if (UploadPayloadDigest(verifiedFiles) != payloadDigest)
+                throw new InvalidOperationException("attachment_file_changed");
+            files = verifiedFiles;
+            var paths = files.ConvertAll(file => file["path"]);
+            await context.Core.CallDevToolsProtocolMethodAsync("DOM.setFileInputFiles",
+                Json.Serialize(new Dictionary<string, object> {
+                    { "nodeId", fileInputNodeId }, { "files", paths }
+                }));
+        }
+        catch (Exception error)
+        {
+            inputError = error;
+        }
+        if (fileChooserIntercepted)
+        {
+            try { await SetFileChooserInterception(context.Core, false); }
+            catch
+            {
+                if (inputError == null)
+                    inputError = new InvalidOperationException("attachment_input_unavailable");
+            }
+        }
+        if (inputError != null)
+            throw inputError;
+
+        request["phase"] = "upload_wait";
+        var deadline = DateTime.UtcNow.AddMinutes(3);
+        Dictionary<string, object> result = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!await PrimaryUnchanged(context) || !ScriptsUnchanged())
+                throw new InvalidOperationException("primary_state_changed");
+            result = await RunChat(context.Core, request);
+            string state = Convert.ToString(result["state"]);
+            if (state == "upload_ready") break;
+            if (state != "waiting")
+                throw new InvalidOperationException(state);
+            await Task.Delay(250);
+        }
+        if (result == null || Convert.ToString(result["state"]) != "upload_ready")
+            throw new InvalidOperationException("attachment_not_ready");
+
+        request["phase"] = "upload_click";
+        result = await RunChat(context.Core, request);
+        if (Convert.ToString(result["state"]) != "upload_clicked")
+            throw new InvalidOperationException("attachment_not_ready");
+        request["phase"] = "upload_observe";
+        deadline = DateTime.UtcNow.AddMinutes(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(250);
+            if (!await PrimaryUnchanged(context) || !ScriptsUnchanged())
+                throw new InvalidOperationException("primary_state_changed");
+            result = await RunChat(context.Core, request);
+            string state = Convert.ToString(result["state"]);
+            if (state == "uploaded") break;
+            if (state != "waiting")
+                throw new InvalidOperationException("upload_outcome_unknown");
+        }
+        if (result == null || Convert.ToString(result["state"]) != "uploaded" ||
+            Convert.ToString(result["chat_id"]) != chatId ||
+            Convert.ToString(result["title"]) != title)
+            throw new InvalidOperationException("upload_outcome_unknown");
+        var receiptFiles = result["files"] as System.Collections.IList;
+        if (receiptFiles == null || receiptFiles.Count != files.Count)
+            throw new InvalidOperationException("upload_outcome_unknown");
+        for (int index = 0; index < files.Count; index++)
+            if (Convert.ToString(receiptFiles[index]) != Convert.ToString(files[index]["name"]))
+                throw new InvalidOperationException("upload_outcome_unknown");
+        if (!Regex.IsMatch(Convert.ToString(result["message_id"]),
+                           "^message-body-[0-9]{13}$") ||
+            String.IsNullOrWhiteSpace(Convert.ToString(result["time"])))
+            throw new InvalidOperationException("upload_outcome_unknown");
+        await VerifyCrossChat(context, author);
+        using (var file = new FileStream(receiptPath, FileMode.CreateNew, FileAccess.Write,
+                                         FileShare.None))
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(result));
+            file.Write(bytes, 0, bytes.Length);
+            file.Flush(true);
+        }
+        return result;
     }
     async Task<Dictionary<string, object>> MessageAction(string operation, Dictionary<string, object> args)
     {
@@ -1772,7 +2230,9 @@ public sealed class TeamsSession : ApplicationContext
                             "copilot_guard_failed", "not_ready", "input_failed", "input_unverified",
                             "submit_unavailable", "draft_changed", "query_in_progress",
                             "model_selector_unavailable", "model_menu_ambiguous", "model_menu_unverified",
-                            "model_unavailable", "model_selector_timeout"
+                            "model_unavailable", "model_selector_timeout", "attachment_input_unavailable",
+                            "attachment_limit_exceeded", "attachment_preexisting", "attachment_not_ready",
+                            "attachment_file_changed", "upload_outcome_unknown"
                         };
                         if (!safeReasons.Contains(reason))
                             reason = "host_operation_failed";

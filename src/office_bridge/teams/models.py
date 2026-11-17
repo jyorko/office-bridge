@@ -126,6 +126,43 @@ class EditReceipt(BaseModel):
     time: str
 
 
+class UploadReceipt(BaseModel):
+    status: Literal["uploaded", "already_uploaded"]
+    chat: WebChatRef
+    message_id: Annotated[str, Field(pattern=r"^message-body-[0-9]{13}$")]
+    time: str
+    files: Annotated[list[str], Field(min_length=1, max_length=10)]
+
+
+class UploadStatus(BaseModel):
+    status: Literal["not_found", "outcome_unknown", "uploaded"]
+    chat: WebChatRef
+    request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")]
+    file_count: Annotated[int, Field(ge=0, le=10)]
+    receipt: UploadReceipt | None = None
+
+
+class UploadReadiness(BaseModel):
+    state: Literal["ready", "blocked"]
+    chat: WebChatRef
+    composer_empty: bool
+    file_input_available: bool
+    file_input_count: Annotated[int, Field(ge=0, le=10)]
+    file_input_accepts: Annotated[str, Field(max_length=160)] = ""
+    file_input_mode: Literal["direct", "attach_menu", "unavailable"] = "unavailable"
+    file_chooser_interception_available: bool = False
+    attach_control_available: bool = False
+    reason: (
+        Literal[
+            "composer_has_draft",
+            "attachments_pending",
+            "file_input_unavailable",
+            "identity_failed",
+        ]
+        | None
+    ) = None
+
+
 class WebChatHistory(BaseModel):
     chat: WebChatRef
     scope: Literal["currently_loaded_history"]
