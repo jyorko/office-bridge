@@ -39,6 +39,12 @@ HOST_ERRORS = frozenset(
         "model_menu_unverified",
         "model_unavailable",
         "model_selector_timeout",
+        "attachment_input_unavailable",
+        "attachment_limit_exceeded",
+        "attachment_preexisting",
+        "attachment_not_ready",
+        "attachment_file_changed",
+        "upload_outcome_unknown",
     }
 )
 
@@ -60,6 +66,9 @@ def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
         "teams_web_send_chat",
         "teams_web_inspect_message",
         "teams_web_edit_message",
+        "teams_web_upload_readiness",
+        "teams_web_upload_files",
+        "teams_web_upload_status",
         "teams_web_message_link",
         "teams_web_message_reactions",
         "teams_web_react_message",

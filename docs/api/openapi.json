@@ -8357,6 +8357,586 @@
         "x-openai-isConsequential": false,
         "x-operation-kind": "action"
       }
+    },
+    "/api/actions/desktop-office/teams-web-upload-readiness/run": {
+      "post": {
+        "summary": "Teams Web Upload Readiness",
+        "description": "Inspect upload support for one exact chat without changing its composer.",
+        "operationId": "teams_web_upload_readiness",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by teams_web_find_chats or teams_web_list_chats."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "blocked"
+                              ],
+                              "title": "State"
+                            },
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "composer_empty": {
+                              "type": "boolean",
+                              "title": "Composer Empty"
+                            },
+                            "file_input_available": {
+                              "type": "boolean",
+                              "title": "File Input Available"
+                            },
+                            "file_input_count": {
+                              "type": "integer",
+                              "maximum": 10.0,
+                              "minimum": 0.0,
+                              "title": "File Input Count"
+                            },
+                            "file_input_accepts": {
+                              "type": "string",
+                              "maxLength": 160,
+                              "title": "File Input Accepts",
+                              "default": ""
+                            },
+                            "file_input_mode": {
+                              "type": "string",
+                              "enum": [
+                                "direct",
+                                "attach_menu",
+                                "unavailable"
+                              ],
+                              "title": "File Input Mode",
+                              "default": "unavailable"
+                            },
+                            "file_chooser_interception_available": {
+                              "type": "boolean",
+                              "title": "File Chooser Interception Available",
+                              "default": false
+                            },
+                            "attach_control_available": {
+                              "type": "boolean",
+                              "title": "Attach Control Available",
+                              "default": false
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "composer_has_draft",
+                                    "attachments_pending",
+                                    "file_input_unavailable",
+                                    "identity_failed"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Reason"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "state",
+                            "chat",
+                            "composer_empty",
+                            "file_input_available",
+                            "file_input_count"
+                          ],
+                          "title": "UploadReadiness"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Upload Readiness"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-upload-files/run": {
+      "post": {
+        "summary": "Teams Web Upload Files",
+        "description": "Upload 1 to 10 bounded local files to one verified Teams chat at most once.\nFiles must be absolute local regular files with unique safe names, no larger\nthan 25 MiB each or 50 MiB total. Existing composer drafts or attachments\nblock the upload. An uncertain result is never replayed.",
+        "operationId": "teams_web_upload_files",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "Exact chat reference returned by teams_web_find_chats or teams_web_list_chats."
+                  },
+                  "file_paths": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "title": "File Paths",
+                    "description": "Absolute local file paths; paths are not retained in the ledger."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "title": "Request Id",
+                    "description": "Unique upload ID; uncertain outcomes require status reconciliation."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "file_paths",
+                  "request_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "uploaded",
+                                "already_uploaded"
+                              ],
+                              "title": "Status"
+                            },
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "message_id": {
+                              "type": "string",
+                              "pattern": "^message-body-[0-9]{13}$",
+                              "title": "Message Id"
+                            },
+                            "time": {
+                              "type": "string",
+                              "title": "Time"
+                            },
+                            "files": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array",
+                              "maxItems": 10,
+                              "minItems": 1,
+                              "title": "Files"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "status",
+                            "chat",
+                            "message_id",
+                            "time",
+                            "files"
+                          ],
+                          "title": "UploadReceipt"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Upload Files"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true,
+        "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/teams-web-upload-status/run": {
+      "post": {
+        "summary": "Teams Web Upload Status",
+        "description": "Reconcile a prior upload receipt without clicking or retrying it.\nIf no durable settled receipt exists, inspect the exact chat manually before\nconsidering any next step. The action never submits files.",
+        "operationId": "teams_web_upload_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat": {
+                    "properties": {
+                      "chat_id": {
+                        "type": "string",
+                        "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                        "title": "Chat Id"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Title"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "chat_id",
+                      "title"
+                    ],
+                    "title": "Chat",
+                    "description": "The same exact chat reference originally used for the upload."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "title": "Request Id",
+                    "description": "Exact upload ID to reconcile."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "chat",
+                  "request_id"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "not_found",
+                                "outcome_unknown",
+                                "uploaded"
+                              ],
+                              "title": "Status"
+                            },
+                            "chat": {
+                              "properties": {
+                                "chat_id": {
+                                  "type": "string",
+                                  "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                  "title": "Chat Id"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "title": "Title"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "chat_id",
+                                "title"
+                              ],
+                              "title": "WebChatRef"
+                            },
+                            "request_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9._-]{1,128}$",
+                              "title": "Request Id"
+                            },
+                            "file_count": {
+                              "type": "integer",
+                              "maximum": 10.0,
+                              "minimum": 0.0,
+                              "title": "File Count"
+                            },
+                            "receipt": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "uploaded",
+                                        "already_uploaded"
+                                      ],
+                                      "title": "Status"
+                                    },
+                                    "chat": {
+                                      "properties": {
+                                        "chat_id": {
+                                          "type": "string",
+                                          "pattern": "^(?:48:notes|19:[A-Za-z0-9._:-]{1,256}@(?:thread\\.(?:v2|skype)|unq\\.gbl\\.spaces))$",
+                                          "title": "Chat Id"
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "maxLength": 120,
+                                          "minLength": 1,
+                                          "title": "Title"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "chat_id",
+                                        "title"
+                                      ],
+                                      "title": "WebChatRef"
+                                    },
+                                    "message_id": {
+                                      "type": "string",
+                                      "pattern": "^message-body-[0-9]{13}$",
+                                      "title": "Message Id"
+                                    },
+                                    "time": {
+                                      "type": "string",
+                                      "title": "Time"
+                                    },
+                                    "files": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array",
+                                      "maxItems": 10,
+                                      "minItems": 1,
+                                      "title": "Files"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "status",
+                                    "chat",
+                                    "message_id",
+                                    "time",
+                                    "files"
+                                  ],
+                                  "title": "UploadReceipt"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "status",
+                            "chat",
+                            "request_id",
+                            "file_count"
+                          ],
+                          "title": "UploadStatus"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The result for the action if it ran successfully"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error",
+                      "description": "The error message if the action failed for some reason"
+                    }
+                  },
+                  "type": "object",
+                  "title": "Response for Teams Web Upload Status"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false,
+        "x-operation-kind": "action"
+      }
     }
   },
   "components": {

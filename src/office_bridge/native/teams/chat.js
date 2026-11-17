@@ -30,9 +30,39 @@
       !!document.getElementById('chat-header-' + chatId);
   const editors = Array.from(document.querySelectorAll('[data-tid="ckeditor"][contenteditable="true"]'))
       .filter(e => e.getClientRects().length);
+  const composerRoot = editor => {
+    const selector = 'button[data-tid="newMessageCommands-send"],button[data-tid="sendMessageCommands-send"]';
+    let current = editor;
+    for (let depth = 0; current && depth < 12; depth++, current = current.parentElement) {
+      if (current === document.body || current === document.documentElement) return null;
+      if (current.querySelector(selector)) return current;
+    }
+    return null;
+  };
+  const pendingComposerFiles = editor => {
+    if (Array.from(document.querySelectorAll('input[type="file"]'))
+      .some(input => input.files?.length)) return true;
+    const root = composerRoot(editor);
+    if (!root) return false;
+    if (Array.from(root.querySelectorAll('input[type="file"]')).some(input => input.files?.length))
+      return true;
+    const textOnly = root.cloneNode(true);
+    textOnly.querySelectorAll(
+      '[data-tid="ckeditor"],[contenteditable="true"],button,[role="button"],input'
+    ).forEach(element => element.remove());
+    const attachmentText = normalizeText(textOnly.innerText || textOnly.textContent);
+    const namedFile = /(?:^|\s)[^\s<>:"/\\|?*]{1,180}\.[A-Za-z0-9]{1,16}(?:$|\s)/i
+      .test(attachmentText);
+    const uploading = root.querySelector(
+      '[role="progressbar"],[aria-busy="true"],[data-tid*="upload-progress"],[data-tid*="file-progress"]'
+    );
+    return namedFile || !!uploading;
+  };
   const hasDraft = e => e.innerText.replace(/\n/g, '').length > 0 ||
       !!e.querySelector('img,video,table,iframe,object,a') || e.querySelectorAll('p').length > 1 ||
-      e.querySelectorAll('br').length > 1;
+      e.querySelectorAll('br').length > 1 || pendingComposerFiles(e);
+  const visible = element => element.getClientRects().length > 0 &&
+      getComputedStyle(element).visibility !== 'hidden';
   const chatTab = () => document.querySelector('[data-tid="app-bar-wrapper"] button[aria-label="Chat"]');
   const chatTabSelected = tab => !!tab && (tab.getAttribute('aria-selected') === 'true' ||
       tab.getAttribute('aria-pressed') === 'true' || tab.getAttribute('aria-current') === 'page');
@@ -129,6 +159,38 @@
   const renderedMatches = (root, canonicalBody, formatting) =>
       normalizeText(root.innerText || root.textContent) === normalizeText(canonicalBody) &&
       matchingFormatting(root, formatting);
+  const uploadInputs = () => Array.from(document.querySelectorAll('input[type="file"]'));
+  const attachControls = root => Array.from(
+    (root || document).querySelectorAll('button,[role="button"]')
+  ).filter(element => visible(element) && !element.disabled &&
+    element.getAttribute('aria-disabled') !== 'true' &&
+    (/^(attach|attachments|attach files|attach a file|add attachment|add file|add files|upload file)$/i
+      .test(normalizeText(element.getAttribute('aria-label') || element.getAttribute('title') ||
+        element.innerText || element.textContent)) ||
+      /(?:^|[-_])attachment(?:[-_]|$)/i.test(element.getAttribute('data-tid') || '')));
+  const uploadNamesVisible = (root, files) => {
+    if (!root) return false;
+    const labels = Array.from(root.querySelectorAll('[aria-label],[title]'))
+      .flatMap(element => [element.getAttribute('aria-label') || '', element.getAttribute('title') || '']);
+    const surface = normalizeText((root.innerText || root.textContent || '') + ' ' + labels.join(' '));
+    return files.every(file => surface.includes(file.name));
+  };
+  const uploadReady = files => {
+    if (editors.length !== 1 || hasDraftText(editors[0])) return false;
+    const root = composerRoot(editors[0]);
+    if (!root || !uploadNamesVisible(root, files)) return false;
+    const pending = root.querySelector(
+      '[role="progressbar"],[aria-busy="true"],[data-tid*="upload-progress"],[data-tid*="file-progress"]'
+    );
+    const buttons = Array.from(root.querySelectorAll(
+      'button[data-tid="newMessageCommands-send"],button[data-tid="sendMessageCommands-send"]'
+    )).filter(element => element.getClientRects().length);
+    return !pending && buttons.length === 1 && !buttons[0].disabled &&
+      buttons[0].getAttribute('aria-disabled') !== 'true';
+  };
+  const hasDraftText = editor => editor.innerText.replace(/\n/g, '').length > 0 ||
+      !!editor.querySelector('img,video,table,iframe,object,a') || editor.querySelectorAll('p').length > 1 ||
+      editor.querySelectorAll('br').length > 1;
   if (phase === 'validate_payload')
     return validatedFragment() ? {state: 'payload_valid'} : {state: 'invalid_format'};
   const openChatListOnce = () => {
@@ -216,6 +278,126 @@
   }
   if (!headerMatches() || matchingRows().length !== 1)
     return {state: 'waiting'};
+  if (phase === 'upload_readiness') {
+    if (editors.length !== 1)
+      return {state: 'blocked', reason: 'identity_failed', composer_empty: false,
+        file_input_available: false, file_input_count: uploadInputs().length, file_input_accepts: ''};
+    const editor = editors[0];
+    const inputs = uploadInputs();
+    const composerEmpty = !hasDraftText(editor) && !pendingComposerFiles(editor);
+    const controls = attachControls(composerRoot(editor));
+    const available = inputs.length === 1 && !inputs[0].disabled &&
+      (!inputs[0].files || inputs[0].files.length === 0);
+    const attachAvailable = controls.length === 1;
+    const accepts = inputs.length === 1 ? (inputs[0].getAttribute('accept') || '').slice(0, 160) : '';
+    const reason = !composerEmpty ? 'composer_has_draft' :
+      !available && !attachAvailable ? 'file_input_unavailable' : null;
+    return {state: reason ? 'blocked' : 'ready', chat_id: chatId, title,
+      composer_empty: composerEmpty, file_input_available: available,
+      file_input_count: Math.min(inputs.length, 10), file_input_accepts: accepts,
+      file_input_mode: available ? 'direct' : attachAvailable ? 'attach_menu' : 'unavailable',
+      attach_control_available: attachAvailable, reason};
+  }
+  if (phase === 'upload_prepare') {
+    if (!requestId || !/^[A-Za-z0-9._-]{1,128}$/.test(requestId) ||
+        !Array.isArray(request.files) || request.files.length < 1 || request.files.length > 10 ||
+        !request.files.every(file => file && typeof file.name === 'string' &&
+          /^[^\\/:*?"<>|\x00-\x1f]{1,180}$/.test(file.name) &&
+          !file.name.endsWith('.') && !file.name.endsWith(' ')) ||
+        editors.length !== 1 || hasDraft(editors[0]))
+      return {state: 'draft_exists'};
+    if (window.__officeUploadRequest)
+      return {state: 'upload_request_exists'};
+    const inputs = uploadInputs();
+    const controls = attachControls(composerRoot(editors[0]));
+    const direct = inputs.length === 1 && !inputs[0].disabled &&
+      (!inputs[0].files || inputs[0].files.length === 0);
+    const mode = direct ? 'direct' : controls.length === 1 ? 'attach_menu' : 'unavailable';
+    if (mode === 'unavailable')
+      return {state: 'attachment_input_unavailable'};
+    const names = request.files.map(file => file.name);
+    if (new Set(names.map(name => name.toLowerCase())).size !== names.length)
+      return {state: 'attachment_limit_exceeded'};
+    window.__officeUploadRequest = {
+      id: requestId, files: request.files, before: Array.from(
+        document.querySelectorAll('[data-tid="chat-pane-message"]')
+      ).map(element => element.id), clicked: false, mode,
+      menuOpened: false, pickerClicked: false
+    };
+    return {state: 'upload_prepared', input_mode: mode};
+  }
+  if (phase === 'upload_open_menu') {
+    const upload = window.__officeUploadRequest;
+    const root = editors.length === 1 ? composerRoot(editors[0]) : null;
+    if (!upload || upload.id !== requestId || upload.mode !== 'attach_menu' ||
+        upload.clicked !== false || upload.menuOpened || !root || hasDraft(editors[0]))
+      return {state: 'draft_changed'};
+    const controls = attachControls(root);
+    if (controls.length !== 1) return {state: 'attachment_input_unavailable'};
+    upload.menuOpened = true;
+    controls[0].click();
+    return {state: 'upload_menu_opened'};
+  }
+  if (phase === 'upload_open_picker') {
+    const upload = window.__officeUploadRequest;
+    if (!upload || upload.id !== requestId || upload.mode !== 'attach_menu' ||
+        upload.menuOpened !== true || upload.pickerClicked || upload.clicked !== false)
+      return {state: 'draft_changed'};
+    const items = Array.from(document.querySelectorAll(
+      '[role="menuitem"],[role="option"],button'
+    )).filter(element => visible(element) && !element.disabled &&
+      element.getAttribute('aria-disabled') !== 'true' &&
+      /^(upload from this device|upload from device|upload from computer|browse this device|browse my computer)$/i
+        .test(normalizeText(element.getAttribute('aria-label') || element.innerText ||
+          element.textContent)));
+    if (items.length === 0) return {state: 'waiting'};
+    if (items.length !== 1) return {state: 'attachment_input_unavailable'};
+    upload.pickerClicked = true;
+    items[0].click();
+    return {state: 'upload_picker_opened'};
+  }
+  if (phase === 'upload_wait' || phase === 'upload_click') {
+    const upload = window.__officeUploadRequest;
+    if (!upload || upload.id !== requestId || upload.clicked !== false ||
+        JSON.stringify(upload.files) !== JSON.stringify(request.files) ||
+        editors.length !== 1 || hasDraftText(editors[0]))
+      return {state: 'draft_changed'};
+    if (!uploadReady(upload.files)) return {state: 'waiting'};
+    if (phase === 'upload_wait') return {state: 'upload_ready'};
+    const root = composerRoot(editors[0]);
+    const buttons = Array.from(root.querySelectorAll(
+      'button[data-tid="newMessageCommands-send"],button[data-tid="sendMessageCommands-send"]'
+    )).filter(element => element.getClientRects().length && !element.disabled &&
+      element.getAttribute('aria-disabled') !== 'true');
+    if (buttons.length !== 1) return {state: 'waiting'};
+    upload.clicked = true;
+    buttons[0].click();
+    return {state: 'upload_clicked'};
+  }
+  if (phase === 'upload_observe') {
+    const upload = window.__officeUploadRequest;
+    if (!upload || upload.id !== requestId || upload.clicked !== true ||
+        JSON.stringify(upload.files) !== JSON.stringify(request.files) || !authorName)
+      return {state: 'failed'};
+    const messages = Array.from(document.querySelectorAll('[data-tid="chat-pane-message"]'))
+      .filter(element => !upload.before.includes(element.id) &&
+        /^message-body-[0-9]{13}$/.test(element.id) &&
+        uploadNamesVisible(element.closest('[data-tid="chat-pane-item"]') || element, upload.files));
+    if (messages.length !== 1) return {state: 'waiting'};
+    const message = messages[0], messageId = message.id.slice('message-body-'.length);
+    if (message.getAttribute('data-mid') !== messageId) return {state: 'waiting'};
+    let parent = message;
+    for (let index = 0; parent && index < 5; index++, parent = parent.parentElement) {
+      const author = parent.querySelector('[data-tid="message-author-name"]');
+      const stamp = parent.querySelector('time');
+      if (author && stamp && author.textContent.trim() === authorName &&
+          Date.parse(stamp.getAttribute('datetime')) === Number(messageId))
+        return {state: 'uploaded', chat_id: chatId, title,
+          message_id: message.id, time: stamp.getAttribute('datetime'),
+          files: upload.files.map(file => file.name)};
+    }
+    return {state: 'waiting'};
+  }
   if (phase.startsWith('message_')) {
     const message=document.getElementById(messageId);
     if (phase==='message_locate' && !message) {
