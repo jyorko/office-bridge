@@ -16,6 +16,9 @@ def test_native_plain_and_markdown_send_return_observed_receipts(tmp_path):
     end = source.index("    async Task<Dictionary<string, object>> RunChat(", start)
     send = source[start:end]
     plan = source[source.index("    sealed class MentionPlanItem") : start]
+    context_start = source.index("    async Task<CrossChatContext> BeginChatContext(")
+    context_end = source.index("    async Task<bool> PrimaryUnchanged(", context_start)
+    context_selection = source[context_start:context_end]
     harness = r"""
 using System;
 using System.Collections.Generic;
@@ -43,19 +46,28 @@ public class NativeSendFixture {
             return Task.FromResult("{}");
         }
     }
-    class Context {
+    class CrossChatContext {
         public Core Core;
         public bool ProtectPrimary = false;
     }
     // PRODUCTION_MENTION_PLAN
     static bool ValidChatId(string id) { return id == "48:notes"; }
     bool ScriptsUnchanged() { return true; }
-    Task<bool> PrimaryUnchanged(Context context) { return Task.FromResult(true); }
-    Task VerifyCrossChat(Context context, string author) { return Task.FromResult(0); }
+    Task<bool> PrimaryUnchanged(CrossChatContext context) { return Task.FromResult(true); }
+    Task VerifyCrossChat(CrossChatContext context, string author) { return Task.FromResult(0); }
     Task OpenExactChatOnAuxiliary(Core core, string id, string title) { return Task.FromResult(0); }
-    Task<Context> BeginCrossChat(bool auxiliary = false) {
-        expectedPhase = "navigate";
-        return Task.FromResult(new Context { Core = new Core { Owner = this } });
+    Task<CrossChatContext> BeginCrossChat(bool auxiliary = false) {
+        expectedPhase = auxiliary ? "locate" : "navigate";
+        return Task.FromResult(new CrossChatContext {
+            Core = new Core { Owner = this }, ProtectPrimary = auxiliary
+        });
+    }
+    Task<Dictionary<string, object>> ExecuteChat(Core core, Dictionary<string, object> request) {
+        if ((string)request["phase"] != "list")
+            throw new Exception("Unexpected chat-list phase");
+        return Task.FromResult(new Dictionary<string, object> {
+            {"items", new object[0]}
+        });
     }
     Task InsertTrackedSendText(Core core, string chatId, string title, string requestId,
         string authorName, string navigationId, string text) {
@@ -75,7 +87,7 @@ public class NativeSendFixture {
         if (phase != expectedPhase)
             throw new Exception("Unexpected phase: " + phase + ", expected " + expectedPhase);
         string state;
-        if (phase == "navigate") { state = "navigated"; expectedPhase = "prepare"; }
+        if (phase == "locate") { state = "ready"; expectedPhase = "prepare"; }
         else if (phase == "prepare") {
             state = "prepared";
             expectedPhase = (string)request["bodyFormat"] == "markdown" ? "paste" : "insert";
@@ -97,6 +109,7 @@ public class NativeSendFixture {
     }
 """
     harness = harness.replace("    // PRODUCTION_MENTION_PLAN", plan)
+    harness += context_selection
     harness += send
     harness += r"""
     public static void Check(string root) {

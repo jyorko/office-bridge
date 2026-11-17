@@ -985,6 +985,23 @@ public sealed class TeamsSession : ApplicationContext
             throw new InvalidOperationException("primary_state_changed");
         return context;
     }
+    async Task<CrossChatContext> BeginChatContext(string chatId)
+    {
+        var context = await BeginCrossChat();
+        if (context.ProtectPrimary)
+            return context;
+        var listed = await ExecuteChat(context.Core, new Dictionary<string, object> {
+            { "phase", "list" }, { "name", null }, { "limit", 100 }
+        });
+        object rawItems;
+        var items = listed.TryGetValue("items", out rawItems)
+            ? rawItems as System.Collections.IList : null;
+        bool loaded = items != null && items.Cast<object>()
+            .OfType<Dictionary<string, object>>()
+            .Any(item => item.ContainsKey("chat_id") &&
+                Convert.ToString(item["chat_id"]) == chatId);
+        return loaded ? context : await BeginCrossChat(true);
+    }
     async Task<bool> PrimaryUnchanged(CrossChatContext context)
     {
         if (HostVisible() || OwnedForeground())
@@ -1290,7 +1307,7 @@ public sealed class TeamsSession : ApplicationContext
             throw new InvalidDataException();
         bool ownContext = context == null;
         if (ownContext)
-            context = await BeginCrossChat();
+            context = await BeginChatContext(chatId);
         string authorName = currentAccountName;
         if (context.ProtectPrimary)
             await OpenExactChatOnAuxiliary(context.Core, chatId, title);
@@ -2389,7 +2406,7 @@ public sealed class TeamsSession : ApplicationContext
              (requestedVisibleBody != visibleBody || visibleBody.Length > 2000)) ||
             (mentionPlan.Count == 0 && requestedVisibleBody != null))
             throw new InvalidDataException();
-        var context = await BeginCrossChat();
+        var context = await BeginChatContext(chatId);
         string authorName = currentAccountName;
         if (context.ProtectPrimary)
             await OpenExactChatOnAuxiliary(context.Core, chatId, title);

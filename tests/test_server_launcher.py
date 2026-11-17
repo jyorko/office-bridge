@@ -16,6 +16,8 @@ def test_launch_modes_use_loopback_and_selected_port_without_api_key(tmp_path, m
     arguments = []
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("ACTIONS_HOME", str(tmp_path / "actions"))
+    monkeypatch.setenv("OFFICE_BRIDGE_ACCOUNT", "fixture@example.com")
     monkeypatch.setenv("OFFICE_BRIDGE_PORT", "0")
     monkeypatch.setattr(local_state, "configured_account", lambda: "fixture@example.com")
     monkeypatch.setattr(package_layout, "stage_package", lambda: None)
