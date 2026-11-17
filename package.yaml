@@ -10,16 +10,14 @@ dependencies:
     - markdown-it-py=4.3.0
     - pydantic=2.14.3
     - robocorp-browser=2.4.0
-
-pythonpath:
-  - src
-dev-dependencies:
-  pypi:
     - actions-runtime=1.1.1
     - pyyaml=6.0.3
     - pytest=9.0.3
     - ruff=0.8.6
     - tomlkit=0.15.2
+
+pythonpath:
+  - src
 dev-tasks:
   test: python -m pytest tests -q
   lint: ruff check src scripts tests
@@ -28,7 +26,6 @@ dev-tasks:
   test-edit: python -m pytest tests/test_teams_web_dom.py tests/test_teams_message_edit.py -q
   test-evidence: python -m pytest tests/test_evidence.py -q
   test-copilot: python -m pytest tests/test_copilot.py tests/test_copilot_dom.py -q
-  bootstrap-rcc: python scripts/bootstrap_runtime.py
   prepare: python scripts/prepare_state.py
   prepare-dev: python scripts/prepare_state.py --dev
   serve: python scripts/run_server.py
@@ -38,6 +35,8 @@ dev-tasks:
   install-skills: python scripts/install_user_skills.py
   verify: python scripts/bootstrap_check.py
   verify-dev: python scripts/bootstrap_check.py --dev
+  complete-startup: python scripts/complete_startup.py
+  complete-startup-dev: python scripts/complete_startup.py --dev
   verify-teams-dev: python scripts/verify_teams_web.py --dev --count 2
   register: python scripts/register_mcp.py
   register-dev: python scripts/register_mcp.py --dev

@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 DRIVER = """
-import json, os, socket, sys
+import json, os, socket, subprocess, sys
 from pathlib import Path
 from _bootstrap import ROOT
 from office_bridge.runtime.endpoint import startup_port, server_record
@@ -37,7 +37,7 @@ if phase == "serve":
     raise SystemExit(main(["start", "--address", "127.0.0.1", "--port", str(port),
         "--actions-sync=false", "--min-processes", "0", "--max-processes", "1",
         "--full-openapi-spec", "--datadir", str(ROOT / ".state/runtime")]))
-elif phase == "verify":
+elif phase == "complete":
     from mcp_client import MCPClient
     with MCPClient() as client:
         client.tools()
@@ -46,6 +46,10 @@ elif phase == "verify":
     (ROOT / ".state/bootstrap-verification.json").write_text(json.dumps({
         "verified": True, "dev": True, "mcp_url": record["mcp_url"],
         "server_instance": record["instance"], "checks": ["teams_web_read_chat"]}))
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/register_mcp.py"), "--dev"],
+        check=True,
+    )
 """
 
 
@@ -90,18 +94,12 @@ def test_real_runtime_fallback_reuse_registration_and_bind_race(tmp_path):
     manifest = (
         manifest[: manifest.index("dev-tasks:")]
         + """dev-tasks:
-  prepare-dev: python scripts/driver.py prepare
   serve-dev: python scripts/driver.py serve
-  verify-dev: python scripts/driver.py verify
-  register-dev: python scripts/register_mcp.py --dev
+  complete-startup-dev: python scripts/driver.py complete
   stop-host: python scripts/driver.py stop
 """
     )
     (project / "package.yaml").write_text(manifest)
-    user = tmp_path / "user"
-    binary = user / ".local/bin/action-server.exe"
-    binary.parent.mkdir(parents=True)
-    shutil.copyfile(SERVER, binary)
     allowed_environment = {
         "SYSTEMROOT",
         "WINDIR",
@@ -118,10 +116,13 @@ def test_real_runtime_fallback_reuse_registration_and_bind_race(tmp_path):
     }
     env = {key: value for key, value in os.environ.items() if key.upper() in allowed_environment}
     env.update(
-        USERPROFILE=str(user),
         CODEX_HOME=str(tmp_path / "codex"),
         COPILOT_HOME=str(tmp_path / "copilot"),
     )
+    original_userprofile = env.get("USERPROFILE")
+    assert original_userprofile
+    expected_server = Path(original_userprofile, ".local", "bin", "action-server.exe")
+    assert expected_server.resolve() == SERVER.resolve()
     env.pop("OFFICE_BRIDGE_TEST_BIND_RACE", None)
     codex = Path(env["CODEX_HOME"]) / "config.toml"
     copilot = Path(env["COPILOT_HOME"]) / "mcp-config.json"
@@ -142,6 +143,7 @@ def test_real_runtime_fallback_reuse_registration_and_bind_race(tmp_path):
         assert not list(project.rglob(".api_key"))
 
     try:
+        assert env["USERPROFILE"] == original_userprofile
         with socket.socket() as occupied:
             occupied.bind(("127.0.0.1", 0))
             occupied.listen()

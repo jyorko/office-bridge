@@ -73,11 +73,8 @@ try {
     }
     if (-not $record) {
         if (-not [string]::IsNullOrWhiteSpace($TeamsAccount)) { $env:OFFICE_BRIDGE_TEAMS_ACCOUNT = $TeamsAccount }
-        $prepareTask = if ($Dev) { 'prepare-dev' } else { 'prepare' }
-        & $actionServer devenv --datadir $taskData task $prepareTask
-        if ($LASTEXITCODE -ne 0) { throw 'Private account configuration could not be prepared.' }
-        Remove-Item Env:OFFICE_BRIDGE_TEAMS_ACCOUNT -ErrorAction SilentlyContinue
     }
+    $startedNew = $false
     $stderrPath = Join-Path $stateDir 'server.stderr.log'
     for ($attempt = 0; $attempt -lt 2; $attempt++) {
         if (-not $record) {
@@ -89,6 +86,7 @@ try {
             $record = @{ pid = $started.Id; task = $taskName; datadir = $taskData; executable = $actionServer; instance = [guid]::NewGuid().ToString('N'); mcp_url = $null; requested_port = $Port; startup_attempt = $attempt + 1 }
             Save-ServerRecord $record
             [IO.File]::WriteAllText((Join-Path $stateDir 'server.pid'), [string]$started.Id)
+            $startedNew = $true
             Write-Output ('Starting Office Bridge; PID ' + $started.Id + '. Waiting for the bound endpoint...')
         }
         $deadline = [DateTime]::UtcNow.AddSeconds(600)
@@ -117,17 +115,13 @@ try {
         }
         throw 'Office Bridge did not publish an owned listener; inspect .state/server.stderr.log. No client configuration was changed.'
     }
+    if ($startedNew) { Remove-Item Env:OFFICE_BRIDGE_TEAMS_ACCOUNT -ErrorAction SilentlyContinue }
     Write-Output ('Office Bridge: ' + ([string]$record.mcp_url).Replace('/mcp', '/') + ' | MCP: ' + $record.mcp_url)
-    $verifyTask = if ($Dev) { 'verify-dev' } else { 'verify' }
-    & $actionServer devenv --datadir $taskData task $verifyTask
-    if ($LASTEXITCODE -ne 0) { throw 'Office Bridge read-only verification failed; clients were not registered.' }
     $env:OFFICE_BRIDGE_SKIP_CODEX = if ($SkipCodex) { '1' } else { '0' }
     $env:OFFICE_BRIDGE_SKIP_COPILOT = if ($SkipCopilot) { '1' } else { '0' }
-    if (-not ($SkipCodex -and $SkipCopilot)) {
-        $registerTask = if ($Dev) { 'register-dev' } else { 'register' }
-        & $actionServer devenv --datadir $taskData task $registerTask
-        if ($LASTEXITCODE -ne 0) { throw 'MCP registration failed; inspect the reported client configuration.' }
-    }
+    $completeTask = if ($Dev) { 'complete-startup-dev' } else { 'complete-startup' }
+    & $actionServer devenv --datadir $taskData task $completeTask
+    if ($LASTEXITCODE -ne 0) { throw 'Office Bridge verification or MCP registration failed; inspect the reported client configuration.' }
 } finally {
     foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process') }
     $startLock.Dispose()

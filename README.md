@@ -14,9 +14,11 @@ Bootstrap installs the pinned Actions Runtime executable, prepares RCC with Wind
 
 Bootstrap reuses the privately saved Teams account, or detects your signed-in Windows work account on a fresh device. Use `-TeamsAccount your.name@company.com` to override it or when Windows cannot provide a work-account address. Teams must still match that exact account. Setup also installs the checksum-verified Windows Actions Runtime executable in `~/.local/bin`.
 
+`package.yaml` keeps the pinned Actions Runtime, action dependencies, and development tools in one base dependency set. RCC provisions one package environment for managed tasks; the first task warms it, and later starts, completion checks, tests, lint, and format checks reuse it. There is no separate bootstrap-only Python environment.
+
 Bootstrap installs the MCP usage and bounded safety verification skills into `~/.agents/skills`, including with `-PrepareOnly`, so agents outside this repository can use them. Installed references identify this checkout. Updates preserve unrelated skills and refuse to overwrite locally edited managed files. To refresh skills without starting or restarting anything, run `action-server devenv --datadir .state/tasks task install-skills`.
 
-`-Dev` enables action auto-reload. Both modes run on loopback without an API key. Use `-PrepareOnly` to install prerequisites without starting. `-SkipCodex` and `-SkipCopilot` independently skip client registration. Start and stop an existing installation with `./powershell/start-office.ps1 -Dev` and `./powershell/stop-office.ps1`.
+`-Dev` enables action auto-reload. Both modes run on loopback without an API key. Use `-PrepareOnly` to install prerequisites without starting. `-SkipCodex` and `-SkipCopilot` independently skip client registration. For a prepared installation, start with `./powershell/start-office.ps1 -Dev` and stop with `./powershell/stop-office.ps1`. Startup selects `serve` or `serve-dev`, then runs the matching `complete-startup` or `complete-startup-dev` task to verify the live server before registering clients.
 
 The server runs hidden in your Windows user session. It is not a Windows service or a logon task. Clients connect to that running server; registration does not launch it. Startup prefers port 8766; when it is unavailable, Runtime asks Windows for a free port. Use `-Port 0` to always request a free port. Startup prints the actual URL and records it in `.state/server.json`; verification and both client registrations use that record.
 

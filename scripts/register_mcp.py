@@ -90,6 +90,47 @@ def registration_documents(path: Path, *, codex: bool, url: str):
     return before, removed, added, entry
 
 
+def register(
+    *,
+    dev: bool,
+    skip_codex: bool | None = None,
+    skip_copilot: bool | None = None,
+) -> None:
+    if skip_codex is None:
+        skip_codex = os.environ.get("OFFICE_BRIDGE_SKIP_CODEX") == "1"
+    if skip_copilot is None:
+        skip_copilot = os.environ.get("OFFICE_BRIDGE_SKIP_COPILOT") == "1"
+    record = server_record(ROOT)
+    evidence = json.loads((ROOT / ".state/bootstrap-verification.json").read_text())
+    if not (
+        evidence.get("verified") is True
+        and evidence.get("dev") is dev
+        and evidence.get("mcp_url") == record["mcp_url"]
+        and evidence.get("server_instance") == record["instance"]
+        and "teams_web_read_chat" in evidence.get("checks", [])
+    ):
+        raise SystemExit("Verify this server instance and mode before MCP registration.")
+    # Parse both files before removing either existing entry.
+    changes = [
+        (path, codex, registration_documents(path, codex=codex, url=record["mcp_url"]))
+        for path, codex, skip in (
+            (CONFIG, True, skip_codex),
+            (COPILOT_CONFIG, False, skip_copilot),
+        )
+        if not skip
+    ]
+    for path, codex, (before, removed, added, entry) in changes:
+        replace_file(path, before, removed)
+        section = "mcp_servers" if codex else "mcpServers"
+        parse = tomllib.loads if codex else json.loads
+        if NAME in parse(path.read_text(encoding="utf-8")).get(section, {}):
+            raise RuntimeError("Old Office Bridge MCP entry was not removed")
+        replace_file(path, removed.encode("utf-8"), added)
+        if parse(path.read_text(encoding="utf-8"))[section].get(NAME) != entry:
+            raise RuntimeError("Office Bridge MCP registration read-back failed")
+        print(f"Refreshed {'Codex' if codex else 'Copilot'} MCP: {record['mcp_url']} ({path})")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dev", action="store_true")
@@ -104,35 +145,7 @@ def main():
         default=os.environ.get("OFFICE_BRIDGE_SKIP_COPILOT") == "1",
     )
     args = parser.parse_args()
-    record = server_record(ROOT)
-    evidence = json.loads((ROOT / ".state/bootstrap-verification.json").read_text())
-    if not (
-        evidence.get("verified") is True
-        and evidence.get("dev") is args.dev
-        and evidence.get("mcp_url") == record["mcp_url"]
-        and evidence.get("server_instance") == record["instance"]
-        and "teams_web_read_chat" in evidence.get("checks", [])
-    ):
-        raise SystemExit("Verify this server instance and mode before MCP registration.")
-    # Parse both files before removing either existing entry.
-    changes = [
-        (path, codex, registration_documents(path, codex=codex, url=record["mcp_url"]))
-        for path, codex, skip in (
-            (CONFIG, True, args.skip_codex),
-            (COPILOT_CONFIG, False, args.skip_copilot),
-        )
-        if not skip
-    ]
-    for path, codex, (before, removed, added, entry) in changes:
-        replace_file(path, before, removed)
-        section = "mcp_servers" if codex else "mcpServers"
-        parse = tomllib.loads if codex else json.loads
-        if NAME in parse(path.read_text(encoding="utf-8")).get(section, {}):
-            raise RuntimeError("Old Office Bridge MCP entry was not removed")
-        replace_file(path, removed.encode("utf-8"), added)
-        if parse(path.read_text(encoding="utf-8"))[section].get(NAME) != entry:
-            raise RuntimeError("Office Bridge MCP registration read-back failed")
-        print(f"Refreshed {'Codex' if codex else 'Copilot'} MCP: {record['mcp_url']} ({path})")
+    register(dev=args.dev, skip_codex=args.skip_codex, skip_copilot=args.skip_copilot)
 
 
 if __name__ == "__main__":
