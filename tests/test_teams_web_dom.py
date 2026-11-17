@@ -110,6 +110,42 @@ def test_message_reactions_and_links_are_bound_to_exact_message(page):
     assert page.evaluate("window.reactions") == 1
 
 
+def test_mention_evidence_is_structural_and_does_not_return_identity_values(page):
+    message_id = "message-body-1700000000001"
+    page.evaluate(
+        """id=>{
+          const message=document.createElement('div');
+          message.id=id;message.dataset.tid='chat-pane-message';
+          message.innerHTML='<p>Private Display Name '
+            +'<readonly itemtype="http://schema.skype.com/Mention" data-tid="private-wrapper-id">'
+            +'<mention mri="private-recipient-id" data-email="private@example.invalid" '
+            +'role="Private Display Name" aria-label="Private Display Name">'
+            +'Private Display Name</mention></readonly></p>';
+          document.body.append(message);
+        }""",
+        message_id,
+    )
+    result = run(page, "inspect_message", message_id=message_id, mention_diagnostics=True)
+    assert result["state"] == "inspected"
+    assert len(result["mentions"]) == 2
+    assert result["capture_date"]
+    encoded = str(result)
+    for private_value in (
+        "Private Display Name",
+        "private-recipient-id",
+        "private@example.invalid",
+        "private-wrapper-id",
+        message_id,
+    ):
+        assert private_value not in encoded
+    mention = next(item for item in result["mentions"] if item["tag"] == "mention")
+    assert {"mri", "data-email", "aria-label"} <= set(mention["attribute_names"])
+    assert mention["role"] == ""
+    assert mention["role_shape"]["length"] == len("Private Display Name")
+    assert mention["data_tid_shape"]["length"] == 0
+    assert all("value_shape" in attribute for attribute in mention["attributes"])
+
+
 def test_toolbar_reaction_checks_content_after_reaction_summary_changes(page):
     message_id = "message-body-1700000000000"
     page.evaluate(
@@ -330,6 +366,7 @@ def run(
     menu_action="",
     expected_text=None,
     limit=20,
+    mention_diagnostics=False,
 ):
     if body_format == "markdown" and nodes is None and html is None:
         prepared = format_body(body, body_format)
@@ -356,6 +393,7 @@ def run(
                 "messageId": message_id,
                 "menuAction": menu_action,
                 "expectedText": expected_text,
+                "mentionDiagnostics": mention_diagnostics,
             },
         ],
     )

@@ -1058,6 +1058,7 @@ public sealed class TeamsSession : ApplicationContext
                                                   initialForeground == GetForegroundWindow() },
                                                 { "generation", generation },
                                                 { "restart_required", restartRequired },
+                                                { "capabilities", new string[0] },
                                                 { "samples", samples.Count > 0 && !account ? samples : null },
                                                 { "reason", reason } };
     }
@@ -1135,7 +1136,7 @@ public sealed class TeamsSession : ApplicationContext
             return await MessageAction(op, request["arguments"] as Dictionary<string, object>);
         if (op == "teams_web_list_chats" || op == "teams_web_read_chat" ||
             op == "teams_web_send_chat" || op == "teams_web_inspect_message" ||
-            op == "teams_web_edit_message")
+            op == "teams_web_inspect_mention_evidence" || op == "teams_web_edit_message")
         {
             object raw;
             if (!request.TryGetValue("arguments", out raw))
@@ -1147,8 +1148,8 @@ public sealed class TeamsSession : ApplicationContext
                 return await ListChats(args);
             if (op == "teams_web_read_chat")
                 return await Read(args);
-            if (op == "teams_web_inspect_message")
-                return await InspectMessage(args);
+            if (op == "teams_web_inspect_message" || op == "teams_web_inspect_mention_evidence")
+                return await InspectMessage(args, op == "teams_web_inspect_mention_evidence");
             if (op == "teams_web_edit_message")
                 return await EditMessage(args);
             return await Send(args);
@@ -1800,7 +1801,8 @@ public sealed class TeamsSession : ApplicationContext
         await VerifyCrossChat(context, author);
         return result;
     }
-    async Task<Dictionary<string, object>> InspectMessage(Dictionary<string, object> args)
+    async Task<Dictionary<string, object>> InspectMessage(
+        Dictionary<string, object> args, bool mentionDiagnostics = false)
     {
         if (Flag(args, "validate_format"))
         {
@@ -1825,21 +1827,35 @@ public sealed class TeamsSession : ApplicationContext
         if (!ValidChatId(chatId) || String.IsNullOrWhiteSpace(title) || title.Length > 120 ||
             !Regex.IsMatch(messageId, "^message-body-[0-9]{13}$"))
             throw new InvalidDataException();
-        var context = await BeginCrossChat();
+        if (mentionDiagnostics && !chatId.StartsWith("19:", StringComparison.Ordinal))
+            throw new InvalidDataException();
+        var context = await BeginCrossChat(mentionDiagnostics);
         string authorName = currentAccountName;
         await Read(new Dictionary<string, object> {
             { "chat", chat }, { "limit", 50 }
         }, context);
         var request = new Dictionary<string, object> {
             { "phase", "inspect_message" }, { "chatId", chatId }, { "title", title },
-            { "messageId", messageId }, { "authorName", authorName }, { "menuAction", "" }
+            { "messageId", messageId }, { "authorName", authorName }, { "menuAction", "" },
+            { "mentionDiagnostics", mentionDiagnostics }
         };
         var result = await RunChat(context.Core, request);
         await VerifyCrossChat(context, authorName);
+        if (mentionDiagnostics)
+        {
+            result["chat_id"] = chatId;
+            result["title"] = title;
+            result["message_id"] = messageId;
+        }
         return result;
     }
     async Task<Dictionary<string, object>> Send(Dictionary<string, object> args)
     {
+        var allowedArguments = new HashSet<string>(StringComparer.Ordinal) {
+            "chat", "body", "body_format", "html", "formatting", "nodes", "request_id"
+        };
+        if (args.Keys.Any(key => !allowedArguments.Contains(key)))
+            throw new InvalidDataException();
         object chatValue, bodyValue, requestValue, rawFormat, rawHtml, rawFormatting, rawNodes;
         if (!args.TryGetValue("chat", out chatValue) || !args.TryGetValue("body", out bodyValue) ||
             !args.TryGetValue("request_id", out requestValue) || String.IsNullOrEmpty(groupScript))

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
 from office_bridge.models import Identifier, Model
 
@@ -57,6 +57,7 @@ class TeamsWebStatus(BaseModel):
     foreground_interference: bool | None = None
     generation: str | None = None
     restart_required: bool | None = None
+    capabilities: list[str] = Field(default_factory=list)
     samples: list[dict] | None = None
     reason: (
         Literal[
@@ -112,11 +113,79 @@ class WebChatSearchResult(BaseModel):
     truncated: bool
 
 
+class MentionRecipient(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: Annotated[str, Field(min_length=3, max_length=320)]
+
+    @field_validator("email")
+    @classmethod
+    def stable_email_shape(cls, value: str) -> str:
+        if value != value.strip() or any(char.isspace() for char in value) or value.count("@") != 1:
+            raise ValueError("Recipient email must be a complete stable address.")
+        local, domain = value.split("@")
+        if (
+            not local
+            or not domain
+            or "." not in domain
+            or domain.startswith(".")
+            or domain.endswith(".")
+        ):
+            raise ValueError("Recipient email must be a complete stable address.")
+        return value
+
+
+class PersonMention(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: Annotated[str, Field(pattern=r"^[a-z0-9-]{1,32}$")]
+    display_label: Annotated[str, Field(min_length=1, max_length=120)]
+    recipient: MentionRecipient
+
+    @field_validator("display_label")
+    @classmethod
+    def display_label_is_single_line(cls, value: str) -> str:
+        if value != value.strip() or any(ord(char) < 32 for char in value):
+            raise ValueError("Mention display label must be trimmed single-line text.")
+        return value
+
+
+class PersonMentions(RootModel[list[PersonMention]]):
+    root: Annotated[list[PersonMention], Field(max_length=10)]
+
+    @model_validator(mode="after")
+    def unique_keys_and_recipients(self):
+        keys = [mention.key for mention in self.root]
+        recipients = [mention.recipient.email.casefold() for mention in self.root]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Mention keys must be unique.")
+        if len(recipients) != len(set(recipients)):
+            raise ValueError("Each recipient may be mentioned only once.")
+        return self
+
+
+class PersonMentionReceipt(BaseModel):
+    """One observed Teams mention entity; notification delivery is not verified."""
+
+    key: str
+    text: str
+    recipient_email: str
+    identity_evidence: str
+    entity_verified: bool
+
+
 class GroupReceipt(BaseModel):
     status: Literal["observed", "already_observed"]
     chat: WebChatRef
     message_id: str
     time: str
+    mentions: list[PersonMentionReceipt] = Field(
+        default_factory=list,
+        exclude_if=lambda mentions: not mentions,
+        description=(
+            "Observed mention entities. This does not verify that Teams delivered notifications."
+        ),
+    )
 
 
 class EditReceipt(BaseModel):

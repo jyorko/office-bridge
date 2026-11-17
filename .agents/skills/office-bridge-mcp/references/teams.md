@@ -12,7 +12,11 @@ Preserve the returned `chat_id` and `title` together. If search returns duplicat
 
 ## Send or edit
 
-`teams_web_send_chat(chat, body, request_id, body_format?)` sends one message to the referenced chat. `body_format` is `plain` by default or supported `markdown`. Require authorization for the exact destination and content. The action reserves the request ID before its single click and verifies a settled message. If the result is uncertain, inspect the chat; do not retry.
+`teams_web_send_chat(chat, body, request_id, body_format?, mentions?)` sends one message to the referenced chat. `body_format` is `plain` by default or supported `markdown`. Require authorization for the exact destination and content. The action reserves the request ID before its single click and verifies a settled message. If the result is uncertain, inspect the chat; do not retry.
+
+The optional `mentions` array is a structured person-mention plan. Each entry has a unique lowercase `key`, an exact `display_label`, and a recipient's explicit email/UPN. Put `{{mention:key}}` exactly once in ordinary paragraph or list text. Placeholders in code, links, emphasis, or strong formatting are refused. A non-empty plan is rejected before reservation unless `teams_web_status` reports the loaded host capability `person_mentions_v1`; the current host reports no such capability. The native host rejects unknown mention arguments and its durable claim digest does not yet bind a mention plan. Keep capability advertisement disabled until native plan validation and digest binding, stable identity resolution, picker handling, and settled entity verification are implemented. Do not treat literal `@Name` text as a mention. A settled receipt may report observed mention entities, but notification delivery is not verified.
+
+`teams_web_inspect_mention_evidence(chat, message_id)` reads one existing settled message in the hidden auxiliary view. It returns bounded DOM structure and hashed attribute-value shapes; it does not return message text, names, email addresses, or raw IDs, and it preserves the primary composer. It does not open a picker or resolve a person.
 
 `teams_web_edit_message(chat, message_id, expected_text, body, request_id, body_format?)` edits an existing message. Use the exact message ID and current text from a fresh read. It verifies chat identity, ownership, and unchanged text before saving. Mentions outside an unchanged leading mention are unsupported. Editing requires authorization; an uncertain result must be reconciled without replay.
 

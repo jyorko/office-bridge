@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from office_bridge import desktop
 from office_bridge.teams.models import WebChatRef
@@ -41,6 +41,135 @@ class ReactionReceipt(BaseModel):
     status: Literal["reacted", "already_reacted"]
 
 
+class MentionValueShape(BaseModel):
+    prefix_class: Literal["empty", "email", "hex-or-guid", "numeric", "url", "identifier", "text"]
+    length: int = Field(ge=0, le=4096)
+    hash: str = Field(pattern=r"^[0-9a-f]{8}$")
+
+
+_SAFE_ARIA_ROLES = {
+    "alert",
+    "alertdialog",
+    "application",
+    "article",
+    "banner",
+    "blockquote",
+    "button",
+    "caption",
+    "cell",
+    "checkbox",
+    "code",
+    "columnheader",
+    "combobox",
+    "complementary",
+    "contentinfo",
+    "definition",
+    "deletion",
+    "dialog",
+    "directory",
+    "document",
+    "emphasis",
+    "feed",
+    "figure",
+    "form",
+    "generic",
+    "grid",
+    "gridcell",
+    "group",
+    "heading",
+    "img",
+    "insertion",
+    "link",
+    "list",
+    "listbox",
+    "listitem",
+    "log",
+    "main",
+    "marquee",
+    "math",
+    "menu",
+    "menubar",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "meter",
+    "navigation",
+    "none",
+    "note",
+    "option",
+    "paragraph",
+    "presentation",
+    "progressbar",
+    "radio",
+    "radiogroup",
+    "region",
+    "row",
+    "rowgroup",
+    "rowheader",
+    "scrollbar",
+    "search",
+    "searchbox",
+    "separator",
+    "slider",
+    "spinbutton",
+    "status",
+    "strong",
+    "subscript",
+    "superscript",
+    "switch",
+    "tab",
+    "table",
+    "tabpanel",
+    "term",
+    "textbox",
+    "time",
+    "timer",
+    "toolbar",
+    "tooltip",
+    "tree",
+    "treegrid",
+    "treeitem",
+}
+
+
+class MentionAttributeEvidence(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    value_shape: MentionValueShape
+
+
+class MentionEntityEvidence(BaseModel):
+    tag: str = Field(min_length=1, max_length=30)
+    depth: int = Field(ge=0, le=19)
+    ancestors: list[str] = Field(max_length=12)
+    attribute_names: list[str] = Field(max_length=30)
+    attributes: list[MentionAttributeEvidence] = Field(max_length=30)
+    role: str = Field(max_length=40)
+    role_shape: MentionValueShape
+    itemtype: str = Field(max_length=80)
+    data_tid_shape: MentionValueShape
+
+    @field_validator("role")
+    @classmethod
+    def role_is_semantic(cls, value: str) -> str:
+        if value and value not in _SAFE_ARIA_ROLES:
+            raise ValueError("Unrecognized ARIA role must be redacted.")
+        return value
+
+
+class MentionEvidenceReport(BaseModel):
+    """Sanitized DOM structure for a settled mention; it contains no identity values or text."""
+
+    state: Literal["inspected", "no_mentions"]
+    capture_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    mentions: list[MentionEntityEvidence] = Field(max_length=20)
+
+    @model_validator(mode="after")
+    def state_matches_evidence(self):
+        if (self.state == "inspected") != bool(self.mentions):
+            raise ValueError("Mention evidence state does not match its entities.")
+        return self
+
+
 def _invoke(operation, chat, message_id, **arguments):
     if not re.fullmatch(r"message-body-[0-9]{13}", message_id):
         raise TeamsError("Invalid message ID.")
@@ -58,6 +187,27 @@ def _invoke(operation, chat, message_id, **arguments):
     ):
         raise TeamsError("The message identity could not be verified.")
     return result
+
+
+def inspect_mention_evidence(chat, message_id):
+    """Return only bounded, anonymized structure from one exact existing message."""
+    result = _invoke(
+        "teams_web_inspect_mention_evidence",
+        chat,
+        message_id,
+    )
+    if result.get("state") not in {"inspected", "no_mentions"}:
+        raise TeamsError("Mention entity evidence is unavailable for that message.")
+    try:
+        return MentionEvidenceReport.model_validate(
+            {
+                "state": result["state"],
+                "capture_date": result["capture_date"],
+                "mentions": result["mentions"],
+            }
+        )
+    except (KeyError, TypeError, ValueError):
+        raise TeamsError("Mention entity evidence could not be safely sanitized.") from None
 
 
 def link(chat, message_id):

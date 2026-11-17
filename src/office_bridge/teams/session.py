@@ -65,6 +65,7 @@ def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
         "teams_web_read_chat",
         "teams_web_send_chat",
         "teams_web_inspect_message",
+        "teams_web_inspect_mention_evidence",
         "teams_web_edit_message",
         "teams_web_upload_readiness",
         "teams_web_upload_files",

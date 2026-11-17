@@ -1,6 +1,6 @@
 (request, renderNodes) => {
   const {phase, chatId, title, limit, name, requestId, body, bodyFormat, nodes, formatting,
-    authorName, navigationId, messageId, menuAction, expectedText} = request;
+    authorName, navigationId, messageId, menuAction, expectedText, mentionDiagnostics} = request;
   const avatar = document.querySelector('[data-tid="me-control-avatar-trigger"]');
   if (location.hostname !== 'teams.cloud.microsoft' || !avatar) return {state: 'identity_failed'};
   const validId = id => id === '48:notes' || /^19:[A-Za-z0-9._:-]{1,256}@(thread\.(v2|skype)|unq\.gbl\.spaces)$/.test(id || '');
@@ -883,6 +883,80 @@
     const message = document.getElementById(messageId);
     if (!message || message.getAttribute('data-tid') !== 'chat-pane-message')
       return {state: 'message_not_loaded'};
+    if (mentionDiagnostics === true) {
+      const relevant = Array.from(
+        message.querySelectorAll('mention,[itemtype="http://schema.skype.com/Mention"]')
+      ).slice(0, 20);
+      const hashSalt = Array.from(crypto.getRandomValues(new Uint32Array(4)),
+        value => value.toString(16)).join('-');
+      const safeAriaRoles = new Set([
+        'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote',
+        'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox',
+        'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory',
+        'document', 'emphasis', 'feed', 'figure', 'form', 'generic', 'grid', 'gridcell',
+        'group', 'heading', 'img', 'insertion', 'link', 'list', 'listbox', 'listitem',
+        'log', 'main', 'marquee', 'math', 'menu', 'menubar', 'menuitem',
+        'menuitemcheckbox', 'menuitemradio', 'meter', 'navigation', 'none', 'note',
+        'option', 'paragraph', 'presentation', 'progressbar', 'radio', 'radiogroup',
+        'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search',
+        'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong', 'subscript',
+        'superscript', 'switch', 'tab', 'table', 'tabpanel', 'term', 'textbox', 'time',
+        'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem'
+      ]);
+      const shape = value => {
+        const text = String(value || '');
+        const salted = hashSalt + '\0' + text;
+        let hash = 2166136261;
+        for (let i = 0; i < salted.length; i++)
+          hash = Math.imul(hash ^ salted.charCodeAt(i), 16777619);
+        let prefixClass = 'text';
+        if (!text) prefixClass = 'empty';
+        else if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text)) prefixClass = 'email';
+        else if (/^[0-9a-f-]{16,}$/i.test(text)) prefixClass = 'hex-or-guid';
+        else if (/^\d+$/.test(text)) prefixClass = 'numeric';
+        else if (/^https?:\/\//i.test(text)) prefixClass = 'url';
+        else if (/^[a-z0-9._-]+$/i.test(text)) prefixClass = 'identifier';
+        return {prefix_class: prefixClass, length: Math.min(text.length, 4096),
+          hash: (hash >>> 0).toString(16).padStart(8, '0')};
+      };
+      const elementEvidence = element => {
+        const attributes = Array.from(element.attributes).slice(0, 30).map(attribute => ({
+          name: attribute.name.slice(0, 80), value_shape: shape(attribute.value)
+        }));
+        const roleValue = element.getAttribute('role') || '';
+        const itemtypeValue = element.getAttribute('itemtype') || '';
+        const normalizedRole = roleValue.toLowerCase();
+        const safeRole = safeAriaRoles.has(normalizedRole) ? normalizedRole : '';
+        const safeItemtype =
+          /^https?:\/\/schema\.skype\.com\/[a-z0-9._-]{1,40}$/i.test(itemtypeValue)
+            ? itemtypeValue : '';
+        const ancestors = [];
+        let depth = 0;
+        for (let parent = element.parentElement; parent && parent !== message;
+          parent = parent.parentElement) {
+          depth++;
+          if (ancestors.length < 12) ancestors.unshift(parent.tagName.toLowerCase());
+        }
+        return {
+          tag: element.tagName.toLowerCase(),
+          depth: Math.min(depth, 19),
+          ancestors,
+          attribute_names: Array.from(element.attributes).slice(0, 30)
+            .map(attribute => attribute.name.slice(0, 80)),
+          attributes,
+          role: safeRole,
+          role_shape: shape(roleValue),
+          itemtype: safeItemtype,
+          data_tid_shape: shape(element.getAttribute('data-tid') || '')
+        };
+      };
+      const evidence = relevant.map(elementEvidence);
+      return {
+        state: evidence.length ? 'inspected' : 'no_mentions',
+        capture_date: new Date().toISOString().slice(0, 10),
+        mentions: evidence
+      };
+    }
     const currentText = message.innerText;
     if (currentText.length > 2000) return {state: 'text_too_long'};
     const rich = {

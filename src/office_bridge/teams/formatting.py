@@ -1,5 +1,6 @@
 """Prepare bounded plain or CommonMark Teams message bodies."""
 
+import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
@@ -11,6 +12,8 @@ MAX_BODY_LENGTH = 2000
 MAX_HTML_BYTES = 12_000
 MAX_RICH_NODES = 2048
 MAX_RICH_DEPTH = 16
+_MENTION_TOKEN = re.compile(r"\{\{mention:([^{}\r\n]*)\}\}")
+_MENTION_KEY = re.compile(r"^[a-z0-9-]{1,32}$")
 _MARKDOWN = MarkdownIt("commonmark", {"html": False, "linkify": False, "typographer": False})
 _BLOCK_TAGS = {"blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre"}
 _ALLOWED_TAGS = _BLOCK_TAGS | {
@@ -233,3 +236,66 @@ def format_body(body: str, body_format: str = "plain") -> PreparedBody:
         formatting=projection.formatting,
         nodes=projection.nodes,
     )
+
+
+def validate_mention_placeholders(body: str, body_format: str, keys: set[str]) -> list[str]:
+    """Validate mention placeholders in plain text or permitted Markdown text nodes."""
+    if body_format == "plain":
+        occurrences = _MENTION_TOKEN.findall(body)
+        if any(not _MENTION_KEY.fullmatch(key) for key in occurrences):
+            raise BodyFormatError("Mention placeholders must use a lowercase key.")
+        if any(key not in keys for key in occurrences):
+            raise BodyFormatError("Every mention placeholder must match its plan.")
+        if set(occurrences) != keys or len(occurrences) != len(keys):
+            raise BodyFormatError("Each planned mention placeholder must appear exactly once.")
+        return occurrences
+
+    if body_format != "markdown":
+        raise BodyFormatError("Body format must be plain or markdown")
+
+    block_stack: list[str] = []
+    occurrences: list[str] = []
+    for token in _MARKDOWN.parse(body):
+        if token.type == "inline":
+            permitted_block = "paragraph_open" in block_stack or "list_item_open" in block_stack
+            inline_stack: list[str] = []
+            for child in token.children or []:
+                if child.type in {"text", "code_inline", "html_inline"}:
+                    matches = _MENTION_TOKEN.findall(child.content)
+                    if matches:
+                        if (
+                            child.type != "text"
+                            or not permitted_block
+                            or any(
+                                kind in inline_stack
+                                for kind in {
+                                    "em_open",
+                                    "strong_open",
+                                    "link_open",
+                                }
+                            )
+                        ):
+                            raise BodyFormatError(
+                                "Mention placeholders are allowed only in ordinary paragraph or list text."
+                            )
+                        if any(not _MENTION_KEY.fullmatch(key) for key in matches):
+                            raise BodyFormatError("Mention placeholders must use a lowercase key.")
+                        occurrences.extend(matches)
+                if child.type.endswith("_open"):
+                    inline_stack.append(child.type)
+                elif child.type.endswith("_close") and inline_stack:
+                    expected = child.type.removesuffix("_close") + "_open"
+                    if inline_stack[-1] == expected:
+                        inline_stack.pop()
+        if token.type.endswith("_open") and token.type not in {"inline"}:
+            block_stack.append(token.type)
+        elif token.type.endswith("_close") and block_stack:
+            expected = token.type.removesuffix("_close") + "_open"
+            if block_stack[-1] == expected:
+                block_stack.pop()
+
+    if any(key not in keys for key in occurrences):
+        raise BodyFormatError("Every mention placeholder must match its plan.")
+    if set(occurrences) != keys or len(occurrences) != len(keys):
+        raise BodyFormatError("Each planned mention placeholder must appear exactly once.")
+    return occurrences
