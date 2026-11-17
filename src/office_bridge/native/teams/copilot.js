@@ -36,38 +36,80 @@
       if (text(editor)) return {state:'draft_exists'};
       if (active && active.clicked && !active.completed) return {state:'query_in_progress'};
     }
-    const controlled=modelButton.getAttribute('aria-controls');
-    let menus=controlled?[document.getElementById(controlled)].filter(e=>e&&visible(e)):[];
-    if (!menus.length && modelButton.id)
-      menus=all('[role="menu"],[role="listbox"]').filter(e=>e.getAttribute('aria-labelledby')===modelButton.id);
-    if (!menus.length && window.__officeCopilotModelMenu)
-      menus=all('[role="menu"],[role="listbox"]');
-    if (!menus.length && window.__officeCopilotModelMenu &&
-        Date.now()-(window.__officeCopilotModelMenu.startedAt||0)>8000 &&
-        modelButton.getAttribute('aria-expanded')!=='true') window.__officeCopilotModelMenu=null;
-    if (!menus.length) {
-      if (window.__officeCopilotModelMenu) return {state:'model_menu_opening'};
-      window.__officeCopilotModelMenu={buttonId:modelButton.id,startedAt:Date.now()};
-      modelButton.click();return {state:'model_menu_opening'};
+    const menuSelector='[role="menu"],[role="listbox"]';
+    const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
+    const branch=e=>/^(menu|true)$/.test(e.getAttribute('aria-haspopup')||'');
+    const options=menu=>Array.from(menu.querySelectorAll(
+      '[role="menuitemradio"],[role="option"],[role="menuitem"]')).filter(e=>
+        visible(e)&&e.closest(menuSelector)===menu);
+    const entries=menu=>options(menu).filter(e=>!branch(e)).map(e=>({
+      element:e,name:(e.getAttribute('aria-label')||text(e)).split('\n')[0].trim().slice(0,120),
+      selected:e.getAttribute('aria-checked')==='true'||e.getAttribute('aria-selected')==='true'||
+        currentModel===(e.getAttribute('aria-label')||text(e)).split('\n')[0].trim(),
+      enabled:enabled(e)})).filter(e=>e.name);
+    const relatedMenus=button=>{
+      const controlled=button.getAttribute('aria-controls');
+      const controlledMenu=controlled?document.getElementById(controlled):null;
+      if (controlledMenu&&visible(controlledMenu)&&controlledMenu.matches(menuSelector)) return [controlledMenu];
+      return button.id?all(menuSelector).filter(e=>e.getAttribute('aria-labelledby')===button.id):[];
+    };
+    let state=window.__officeCopilotModelMenu;
+    const close=()=>{
+      if (state?.owned&&state.root&&visible(state.root)) modelButton.click();
+      window.__officeCopilotModelMenu=null;
+    };
+    const fail=reason=>{close();return {state:reason};};
+    if (state&&Date.now()-state.startedAt>8000) return fail('model_menu_unverified');
+    if (!state) {
+      const roots=relatedMenus(modelButton);
+      if (roots.length>1) return {state:'model_menu_ambiguous'};
+      state=window.__officeCopilotModelMenu={startedAt:Date.now(),owned:!roots.length,
+        root:roots[0]||null,groups:null,index:0,items:[],pending:null};
+      if (!roots.length) {modelButton.click();return {state:'model_menu_opening'};}
     }
-    if (menus.length!==1) return {state:'model_menu_ambiguous'};
-    const radios=Array.from(menus[0].querySelectorAll('[role="menuitemradio"],[role="option"]')).filter(visible);
-    const options=radios.length?radios:Array.from(menus[0].querySelectorAll('[role="menuitem"]')).filter(visible);
-    const entries=options.map(e=>({element:e,name:(e.getAttribute('aria-label')||text(e)).split('\n')[0].trim().slice(0,120),
-      selected:e.getAttribute('aria-checked')==='true'||e.getAttribute('aria-selected')==='true',
-      enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true'})).filter(e=>e.name);
-    const items=entries.map(({element,...item})=>item);
-    if (!items.length || items.length>30) return {state:'model_menu_unverified'};
-    if (request.phase==='models') {
-      if (window.__officeCopilotModelMenu) {modelButton.click();window.__officeCopilotModelMenu=null;}
-      return {state:'models',model:currentModel,models:items};
+    if (!state.root) {
+      let roots=relatedMenus(modelButton);
+      if (!roots.length&&state.owned) roots=all(menuSelector);
+      if (!roots.length) return {state:'model_menu_opening'};
+      if (roots.length!==1) return fail('model_menu_ambiguous');
+      state.root=roots[0];
     }
-    const selected=entries.filter(e=>e.name===request.model&&e.enabled);
-    if (selected.length!==1) {
-      modelButton.click();window.__officeCopilotModelMenu=null;return {state:'model_unavailable'};
+    if (!visible(state.root)) return fail('model_menu_unverified');
+    let currentEntries;
+    if (state.pending) {
+      let children=relatedMenus(state.pending);
+      if (!children.length) children=all(menuSelector).filter(e=>e!==state.root);
+      if (!children.length) return {state:'model_menu_opening'};
+      if (children.length!==1) return fail('model_menu_ambiguous');
+      if (options(children[0]).some(branch)) return fail('model_menu_unverified');
+      currentEntries=entries(children[0]);
+      if (!currentEntries.length) return fail('model_menu_unverified');
+      state.pending=null;
+    } else if (!state.groups) {
+      currentEntries=entries(state.root);
+      state.groups=options(state.root).filter(e=>branch(e)&&enabled(e));
+      if (state.groups.length>8) return fail('model_menu_unverified');
+    } else currentEntries=[];
+    if (request.phase==='select_model') {
+      const selected=currentEntries.filter(e=>e.name===request.model&&e.enabled);
+      if (selected.length>1) return fail('model_menu_ambiguous');
+      if (selected.length===1) {
+        selected[0].element.click();window.__officeCopilotModelMenu=null;
+        return {state:'model_selection_pending'};
+      }
     }
-    selected[0].element.click();window.__officeCopilotModelMenu=null;
-    return {state:'model_selection_pending'};
+    state.items.push(...currentEntries.map(({element,...item})=>item));
+    if (state.items.length>30) return fail('model_menu_unverified');
+    if (state.index<state.groups.length) {
+      state.pending=state.groups[state.index++];
+      if (!visible(state.pending)) return fail('model_menu_unverified');
+      state.pending.click();return {state:'model_menu_opening'};
+    }
+    if (request.phase==='select_model') return fail('model_unavailable');
+    if (!state.items.length||new Set(state.items.map(e=>e.name)).size!==state.items.length)
+      return fail('model_menu_unverified');
+    const items=state.items;close();
+    return {state:'models',model:currentModel,models:items};
   }
   if (request.phase === 'verify_prepare') {
     const previous=window.__officeCopilotQuery;
@@ -162,6 +204,11 @@
         attrs:Array.from(e.attributes).filter(a=>/^(data-|aria-|contenteditable|role)/.test(a.name))
           .map(a=>[a.name,a.value]).slice(0,20)});
     return {state:'inspected',editors:editors.map(meta),work_iq:work.map(meta),ancestors,
+      model_menus:all('[role="menu"],[role="listbox"]').map(menu=>({
+        ...meta(menu),labelled_by:menu.getAttribute('aria-labelledby'),
+        options:Array.from(menu.querySelectorAll('[role^="menuitem"],[role="option"]')).filter(visible)
+          .map(e=>({...meta(e),has_popup:e.getAttribute('aria-haspopup'),
+            controls:e.getAttribute('aria-controls'),expanded:e.getAttribute('aria-expanded')}))})),
       query:window.__officeCopilotQuery ? {request_id:window.__officeCopilotQuery.requestId,clicked:window.__officeCopilotQuery.clicked} : null,
       buttons:controls.filter(e=>!/^(More|Chats)$/.test(e.getAttribute('aria-label')||e.innerText||''))
         .slice(-50).map(meta),

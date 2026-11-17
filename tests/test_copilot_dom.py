@@ -148,3 +148,71 @@ def test_model_dropdown_is_discovered_and_changes_only_an_enabled_choice(page): 
     page.locator('[role="textbox"]').fill("Existing draft")
     assert run("select_model", "Example")["state"] == "draft_exists"
     assert page.locator('[role="textbox"]').inner_text() == "Existing draft"
+
+
+def test_model_submenus_are_discovered_without_selecting_and_exact_model_is_verified(page):  # noqa: F811
+    html = """<button role="switch" aria-label="Turn off Work IQ" aria-checked="true">Work IQ</button>
+      <span style="display:inline-block;min-width:100px;min-height:30px" id="m365-chat-editor-target-element" role="textbox" aria-label="Message Copilot" contenteditable="true" data-lexical-editor="true"></span>
+      <button id="model-button" aria-label="Think deeper, Model Selector" aria-controls="models"
+        onclick="models.hidden=!models.hidden;claude.hidden=true;gpt.hidden=true">Models</button>
+      <div id="models" role="menu" aria-labelledby="model-button" hidden>
+        <button role="menuitemradio">Auto</button>
+        <button role="menuitemradio" aria-checked="true">Think deeper</button>
+        <button id="claude-trigger" role="menuitem" aria-haspopup="menu" aria-controls="claude"
+          onclick="claude.hidden=false;gpt.hidden=true">Claude<br>Anthropic</button>
+        <button id="gpt-trigger" role="menuitem" aria-haspopup="menu" aria-controls="gpt"
+          onclick="gpt.hidden=false;claude.hidden=true">GPT<br>OpenAI</button>
+      </div>
+      <div id="claude" role="menu" aria-labelledby="claude-trigger" hidden>
+        <button role="menuitemradio">Sonnet 5.5</button>
+        <button role="menuitemradio" onclick="window.selections=(window.selections||0)+1;
+          document.getElementById('model-button').setAttribute('aria-label','Opus 5.5, Model Selector');
+          models.querySelector('[aria-checked]').setAttribute('aria-checked','false');
+          models.hidden=true;claude.hidden=true">Opus 5.5</button>
+        <button role="menuitemradio" aria-disabled="true">Unavailable</button>
+      </div>
+      <div id="gpt" role="menu" aria-labelledby="gpt-trigger" hidden>
+        <button role="menuitemradio">GPT example</button>
+      </div>"""
+    page.route(
+        "https://m365copilotapp.svc.cloud.microsoft/**",
+        lambda route: route.fulfill(body=html, content_type="text/html"),
+    )
+    page.goto("https://m365copilotapp.svc.cloud.microsoft/chat")
+
+    def run(phase, model=None):
+        return page.evaluate(
+            "([source,request])=>(0,eval)('('+source+')')(request)",
+            [SCRIPT, {"phase": phase, "model": model}],
+        )
+
+    def finish(phase, model=None):
+        for _ in range(8):
+            result = run(phase, model)
+            if result["state"] not in {"model_menu_opening", "model_selection_pending"}:
+                return result
+        raise AssertionError("Model traversal did not finish")
+
+    choices = finish("models")
+    assert choices["state"] == "models"
+    assert [item["name"] for item in choices["models"]] == [
+        "Auto",
+        "Think deeper",
+        "Sonnet 5.5",
+        "Opus 5.5",
+        "Unavailable",
+        "GPT example",
+    ]
+    assert choices["model"] == "Think deeper"
+    assert choices["models"][4]["enabled"] is False
+    assert page.evaluate("window.selections||0") == 0
+    assert page.locator("#models").is_hidden()
+    assert finish("select_model", "Unavailable")["state"] == "model_unavailable"
+    assert page.evaluate("window.selections||0") == 0
+    assert finish("select_model", "Opus 5.5") == {"state": "model_selected", "model": "Opus 5.5"}
+    assert page.evaluate("window.selections") == 1
+    selected = finish("models")
+    assert [item["name"] for item in selected["models"] if item["selected"]] == ["Opus 5.5"]
+    page.locator('[role="textbox"]').fill("Existing draft")
+    assert run("select_model", "Think deeper")["state"] == "draft_exists"
+    assert page.locator('[role="textbox"]').inner_text() == "Existing draft"
