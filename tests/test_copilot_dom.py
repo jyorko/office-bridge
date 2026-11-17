@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from test_teams_web_dom import page  # noqa: F401
 
 SCRIPT = (
@@ -7,7 +8,8 @@ SCRIPT = (
 ).read_text(encoding="utf-8")
 
 
-def test_copilot_guards_drafts_work_iq_and_duplicate_clicks(page):  # noqa: F811
+@pytest.mark.parametrize("empty_reply_placeholder", [False, True])
+def test_copilot_guards_drafts_work_iq_and_duplicate_clicks(page, empty_reply_placeholder):  # noqa: F811
     html = """<button role="switch" aria-label="Turn off Work IQ" aria-checked="true">Work IQ</button>
       <span style="display:inline-block;min-width:100px;min-height:30px" id="m365-chat-editor-target-element" role="textbox" aria-label="Message Copilot" contenteditable="true" data-lexical-editor="true"></span>
       <button aria-label="Send" onclick="window.clicks=(window.clicks||0)+1">Send</button>"""
@@ -53,6 +55,15 @@ def test_copilot_guards_drafts_work_iq_and_duplicate_clicks(page):  # noqa: F811
       document.body.append(turn);
       window.testNow=10000;Date.now=()=>window.testNow;
     }""")
+    if empty_reply_placeholder:
+        page.locator('[data-testid="copilot-message-div"]').evaluate("""e=>{
+          const placeholder=document.createElement('div');
+          placeholder.setAttribute('data-testid','markdown-reply');
+          placeholder.style.cssText='min-width:20px;min-height:20px';
+          placeholder.textContent='\\n ';
+          e.prepend(placeholder);
+        }""")
+        assert page.locator('[data-testid="markdown-reply"]').first.is_visible()
     page.locator('[data-testid="m365-chat-llm-web-ui-chat-message"] > p').evaluate(
         "e=>e.textContent='Unrelated question'"
     )

@@ -168,7 +168,8 @@
       work_iq_enabled:workEnabled,submission_verified:turns.length===1};
     if (turns.length!==1) return waiting;
     const turn=turns[0], response=turn.querySelector('[data-testid="copilot-message-div"]');
-    const replies=response ? Array.from(response.querySelectorAll('[data-testid="markdown-reply"]')).filter(visible) : [];
+    const replies=response ? Array.from(response.querySelectorAll('[data-testid="markdown-reply"]'))
+      .filter(e=>visible(e)&&text(e).length>0) : [];
     const copy=Array.from(turn.querySelectorAll('button[data-testid="CopyButtonTestId"]')).filter(e=>
       visible(e) && e.getAttribute('aria-label')==='Copy Response' && !e.disabled);
     const stop=all('button').some(e=>/^Stop(?: generating| responding| response)?$/i.test(e.getAttribute('aria-label')||''));
