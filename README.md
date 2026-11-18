@@ -27,6 +27,10 @@ The server runs hidden in your Windows user session. It is not a Windows service
 - Full live API: `<printed server URL>/openapi.json`
 - Saved API: [docs/api/openapi.json](docs/api/openapi.json)
 
+## Message views
+
+Outlook mail, Teams conversations and send receipts share a view alongside each action’s original result. Inbox expansion and filtering work locally. In T3’s native MCP App, **Read email** opens a specific message. Choose **Reply** or **Reply all**, write the reply, then choose **Create draft** to save it in Outlook. Ordinary Codex opens the same view in a dedicated, non-activating InPrivate WebView2 window. The window verifies the mail controls against the running server and reuses its identity across action workers. The [presentation guide](.agents/skills/office-bridge-mcp/references/presentation.md) covers the native app, script-free reading fallback and explicit window opening in T3.
+
 ## Layout
 
 ```text
@@ -47,7 +51,7 @@ docs/                        Architecture, operations, and API reference
 
 The official Actions Runtime serves the project directly from `package.yaml` and `src/`. `.state` stores private local task state. `.runtime` is an ignored legacy disposable environment; it is not required. `.package` is generated and not published.
 
-All WebView2 implementation code is in `src/office_bridge/native/teams/`. Its SDK installer and process supervisor are in `src/office_bridge/runtime/`. Bootstrap recreates generated files from those sources. See [local data](docs/operations.md#local-data) for the separate browser profile and private configuration.
+All Teams WebView2 implementation code is in `src/office_bridge/native/teams/`. Its SDK installer and process supervisor are in `src/office_bridge/runtime/`. Primary, auxiliary and Copilot WebView2 controllers allow browser audio and report their mute state through `teams_web_status`. Bootstrap recreates generated files from those sources. See [local data](docs/operations.md#local-data) for the separate browser profile and private configuration.
 
 ## Verify
 

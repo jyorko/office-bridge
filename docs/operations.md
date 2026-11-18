@@ -12,6 +12,20 @@ The launcher runs two managed tasks: `serve` or `serve-dev`, followed by the mat
 
 Python action changes reload automatically in development. Each Teams host loads an immutable native/JavaScript code snapshot in its private application directory. Editing repository sources does not invalidate operational reads. After changing native C# or JavaScript, run `action-server devenv --datadir .state/tasks task reload-teams`, then `action-server devenv --datadir .state/tasks task verify-teams-dev`. This reloads the isolated Teams host while the server UI stays available. The supervisor limits starts to three per five minutes; if recovery stops, use the normal server stop/start commands. Check `teams_web_status.restart_required` before sends; unexpected changes to the loaded private snapshot still stop operations.
 
+## Outlook Web session
+
+The Outlook controller is a launcher-owned WebView2 host with its own persistent profile at `%LOCALAPPDATA%/OfficeActionServer/outlook-webview2-profile`. It reads the expected mailbox from the private application configuration and enables Windows primary-account SSO. The initial `https://outlook.office.com/mail/` navigation can redirect to `outlook.cloud.microsoft`; both hosts are explicitly allowed by the controller. Do not copy cookies or profile data from the normal browser.
+
+The Outlook app shell loading is not proof of mailbox authentication. The host reports `authenticated` only when the active Outlook account menu contains exactly the configured mailbox and a sign-out control. A missing account menu, an account-picker option, or a successful page navigation without that evidence remains `identity_unverified`; stop rather than falling back to classic Outlook.
+
+The launcher does not pass `-Visible` to the Outlook bootstrap, so normal operation stays hidden. For an explicitly requested visual check, `src/office_bridge/native/outlook/bootstrap.ps1 -Visible` shows only the dedicated Outlook profile. It does not use keyboard input, clipboard, or the normal Outlook/browser window. The same profile lock prevents a second Outlook controller from using the profile concurrently. `CoreWebView2.IsMuted` is set to `false` before navigation so Outlook audio can play, and `outlook_status.audio_muted` reports the live mute state.
+
+After changing Outlook's native C# host, run `action-server devenv --datadir .state/tasks task reload-outlook`. The task sends the configured shutdown token through the current named pipe and waits for the launcher supervisor to start a new generation. Do not restart an Outlook process by name or use a pipe from another profile.
+
+`outlook_inbox_list` and `outlook_search_inbox` return conversation references because Outlook's list exposes conversation IDs. Pass one to `outlook_get_message` to resolve an exact message item ID. The detail reference includes both the item ID and its conversation ID. `MessageVersion.version_digest` binds the observed message fields and body. The adapter leaves `modified_at` null rather than deriving it from the received time.
+
+The live hidden host has verified the configured mailbox and returned a bounded inbox list. The current probe has not yet proved an exact item ID from an opened message. `outlook_get_message` fails closed until the loaded host proves that ID. The draft, reply, attachment, send, and archive handlers remain unavailable and return `outlook_operation_unavailable`. Do not treat those actions as ready until the WebView2 handlers pass synthetic behavior tests and the read-only live message check succeeds.
+
 ## Copilot Work IQ
 
 `teams_copilot_status` opens or checks a dedicated hidden Copilot pane in the launcher-owned Teams session. The host verifies the configured Teams account through Windows SSO and verifies the embedded Microsoft 365 Copilot surface and enabled Work IQ switch. An existing Copilot draft is preserved. This pane is separate from chat navigation and survives disposable Action Server workers.

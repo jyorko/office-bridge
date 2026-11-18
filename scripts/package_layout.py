@@ -5,7 +5,7 @@ from pathlib import Path
 
 from _bootstrap import ROOT
 
-SOURCE_SUFFIXES = {".py", ".ps1", ".js", ".cs"}
+SOURCE_SUFFIXES = {".py", ".ps1", ".js", ".cs", ".html"}
 
 
 def package_files(root: Path = ROOT) -> dict[Path, Path]:
@@ -29,11 +29,13 @@ def stage_package(root: Path = ROOT) -> int:
         raise RuntimeError("Refusing to stage through a redirected package directory.")
     staged.mkdir(exist_ok=True)
     files = package_files(root)
+    assets_changed = False
     for target in staged.rglob("*"):
         if target.is_file() and target.relative_to(staged) not in files:
             if not target.resolve().is_relative_to(staged):
                 raise RuntimeError("Staged file resolves outside the package directory.")
             target.unlink()
+            assets_changed |= target.suffix in {".html", ".cs", ".ps1", ".js"}
     for directory in sorted(
         (path for path in staged.rglob("*") if path.is_dir()),
         key=lambda path: len(path.parts),
@@ -51,6 +53,10 @@ def stage_package(root: Path = ROOT) -> int:
             raise RuntimeError("Staged destination resolves outside the package directory.")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
+        assets_changed |= target.suffix in {".html", ".cs", ".ps1", ".js"}
+    if assets_changed:
+        # Runtime 1.1.1 watches Python and YAML when publishing worker snapshots.
+        (staged / "package.yaml").touch()
     return len(files)
 
 

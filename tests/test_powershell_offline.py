@@ -62,7 +62,7 @@ if ((Get-Content -LiteralPath $OutputFile -Raw).Trim() -cne 'preserved') { throw
     assert result.returncode == 0, result.stderr
 
 
-def test_powershell_identity_version_digest_guards(tmp_path):
+def test_desktop_teams_navigation_guards(tmp_path):
     source = Path(__file__).parents[1] / "src" / "office_bridge" / "native" / "office.ps1"
     harness = tmp_path / "synthetic.ps1"
     harness.write_text(
@@ -72,7 +72,7 @@ $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($SourceFile,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'PowerShell syntax errors'}
-# Extract function definitions only. The dispatcher, COM startup and UI calls never execute.
+# Extract function definitions only. The dispatcher and UI calls never execute.
 $functions=$ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)
 $functions | ForEach-Object {. ([scriptblock]::Create($_.Extent.Text))}
 $utf8=New-Object System.Text.UTF8Encoding($false)
@@ -81,55 +81,10 @@ function Assert-Failure([scriptblock]$code,[string]$expectedCode){
  try{& $code}catch{if($_.Exception.Message -cne $expectedCode){throw};$caught=$true}
  if(-not $caught){throw "Expected $expectedCode"}
 }
-$parent=[pscustomobject]@{EntryID='inbox';StoreID='store-A'}
-$mail=[pscustomobject]@{EntryID='entry';Class=43;Parent=$parent;LastModificationTime=[datetime]'2026-11-12T12:00:00Z';Subject='Subject';UnRead=$true;FlagStatus=0;Importance=1}
-$ns=[pscustomobject]@{Item=$mail}
-$ns | Add-Member ScriptMethod GetItemFromID {param($entry,$store) return $this.Item}
-$valid=[pscustomobject]@{entry_id='entry';store_id='store-A'}
-if((Get-Mail $valid).EntryID -cne 'entry'){throw 'Good identity rejected'}
-Assert-Failure {Get-Mail ([pscustomobject]@{entry_id='entry';store_id='other-store'})} 'not_found'
-$expected=[pscustomobject](Version $mail)
-Check-Version $mail $expected
-$mail.Subject='Changed by user'
-Assert-Failure {Check-Version $mail $expected} 'stale_message'
-$mail.Subject='Subject';$mail.FlagStatus=2
-Assert-Failure {Check-Version $mail $expected} 'stale_message'
-$mail.FlagStatus=0;$mail.LastModificationTime=$mail.LastModificationTime.AddSeconds(1)
-Assert-Failure {Check-Version $mail $expected} 'stale_message'
-$entry=[pscustomobject]@{Type='SMTP';Address='user@example.test'}
-$recipient=[pscustomobject]@{Name='Recipient';Type=1;AddressEntry=$entry}
-$recipients=[pscustomobject]@{Count=1;Recipient=$recipient}
-$recipients | Add-Member ScriptMethod Item {param($index) return $this.Recipient}
-$draft=[pscustomobject]@{Subject='Draft';Body='Body';Recipients=$recipients;BodyFormat=1;Attachments=[pscustomobject]@{Count=0};SendUsingAccount=[pscustomobject]@{SmtpAddress='sender@example.test'};SentOnBehalfOfName=''}
-$digest=Digest $draft
-if($digest -notmatch '^[a-f0-9]{64}$'){throw 'Invalid digest'}
-$draft.Body='Edited';if((Digest $draft) -ceq $digest){throw 'Body edit undetected'}
-$draft.Body='Body';$recipient.Type=2;if((Digest $draft) -ceq $digest){throw 'Recipient role edit undetected'}
-$recipient.Type=1;$entry.Address='other@example.test';if((Digest $draft) -ceq $digest){throw 'Recipient edit undetected'}
-$entry.Address='unresolved';Assert-Failure {Digest $draft} 'unresolved_recipient'
-$entry.Address='user@example.test';$draft.BodyFormat=2;Assert-Failure {Digest $draft} 'stale_draft'
-$draft.BodyFormat=1;$draft.Attachments.Count=1;Assert-Failure {Digest $draft} 'stale_draft'
-$draft.Attachments.Count=0;$draft.SendUsingAccount.SmtpAddress='other@example.test'
-if((Digest $draft) -ceq $digest){throw 'Sender account edit undetected'}
-$fallback=[pscustomobject]@{SmtpAddress='sender@example.test';DeliveryStore=[pscustomobject]@{StoreID='store-A'}}
-$ns | Add-Member NoteProperty Accounts @($fallback)
-$draft | Add-Member NoteProperty Parent ([pscustomobject]@{StoreID='store-A'})
-$draft.SendUsingAccount=$null
-if((Digest $draft) -cne $digest){throw 'Reopened draft account fallback changed digest'}
-$ns.Accounts=@($fallback,$fallback)
-Assert-Failure {Digest $draft} 'stale_draft'
-$ns.Accounts=@([pscustomobject]@{SmtpAddress='other@example.test';DeliveryStore=[pscustomobject]@{StoreID='store-A'}})
-if((Digest $draft) -ceq $digest){throw 'Fallback account identity change undetected'}
 if((Chat-Name 'Chat Briggs, Gary Out of office Last message text') -cne 'Briggs, Gary'){throw 'DM normalization failed'}
 if((Chat-Name 'Group chat Design Review Has pinned messages Last message text') -cne 'Design Review'){throw 'Group normalization failed'}
 if($null -ne (Chat-Name 'Favorites')){throw 'Category accepted as chat'}
 if((Chat-Name 'Chat Person In a meeting Last message text') -cne 'Person'){throw 'Meeting presence normalization failed'}
-$env:OFFICE_BRIDGE_ACCOUNT='user@example.test'
-Assert-ConfiguredAccount 'user@example.test' 'user@example.test'
-Assert-Failure {Assert-ConfiguredAccount 'user@example.test' 'other@example.test'} 'self_identity_unverified'
-Assert-Failure {Assert-ConfiguredAccount 'other@example.test' 'other@example.test'} 'self_identity_unverified'
-Remove-Item Env:\OFFICE_BRIDGE_ACCOUNT
-Assert-Failure {Assert-ConfiguredAccount 'user@example.test' 'user@example.test'} 'self_identity_unverified'
 Assert-NotEditing 123 999 $true
 Assert-NotEditing 123 123 $false
 Assert-Failure {Assert-NotEditing 123 123 $true} 'desktop_busy'

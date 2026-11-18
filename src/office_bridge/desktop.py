@@ -1,4 +1,4 @@
-"""Fixed, bounded JSON-file boundary to Windows PowerShell. No shell interpolation."""
+"""Bounded clients for persistent Office hosts and legacy desktop Teams reads."""
 
 import json
 import os
@@ -55,6 +55,20 @@ MUTATIONS = frozenset(
         "teams_web_set_reaction",
     }
 )
+OUTLOOK_OPERATIONS = {
+    "inbox_list": "outlook_inbox_list",
+    "get_message": "outlook_get_message",
+    "search_inbox": "outlook_search_inbox",
+    "create_reply_draft": "outlook_create_reply_draft",
+    "create_mail_draft": "outlook_create_mail_draft",
+    "send_draft": "outlook_send_draft",
+    "archive": "outlook_archive",
+    "download_attachments": "outlook_download_attachments",
+}
+OUTLOOK_SUPPORTED = frozenset(OUTLOOK_OPERATIONS)
+OUTLOOK_UNCERTAIN_MUTATIONS = frozenset(
+    {"create_reply_draft", "create_mail_draft", "send_draft", "archive"}
+)
 MAX_BYTES = 1_048_576
 SCRIPT = NATIVE / "office.ps1"
 
@@ -70,6 +84,33 @@ def invoke(operation: str, arguments: dict) -> dict:
         raise BridgeError("invalid_operation")
     if os.name != "nt":
         raise BridgeError("windows_required")
+    if operation in OUTLOOK_OPERATIONS:
+        if operation not in OUTLOOK_SUPPORTED:
+            raise BridgeError("outlook_operation_unavailable")
+        from office_bridge.outlook.session import SessionError
+        from office_bridge.outlook.session import invoke as invoke_outlook
+
+        try:
+            timeout = (
+                300
+                if operation == "download_attachments"
+                else 35
+                if operation == "get_message"
+                else 90
+            )
+            return invoke_outlook(OUTLOOK_OPERATIONS[operation], arguments, timeout=timeout)
+        except SessionError as error:
+            code = error.args[0] if error.args else "host_operation_failed"
+            if operation in OUTLOOK_UNCERTAIN_MUTATIONS and code in {
+                "session_unavailable",
+                "session_write_failed",
+                "session_disconnected",
+                "session_timeout",
+                "invalid_response",
+                "host_operation_failed",
+            }:
+                code = "mutation_outcome_unknown"
+            raise BridgeError(code) from None
     if operation in {
         "teams_web_status",
         "teams_web_list_chats",
@@ -101,7 +142,6 @@ def invoke(operation: str, arguments: dict) -> dict:
         Path(os.environ.get("SystemRoot", r"C:\Windows"))
         / "System32/WindowsPowerShell/v1.0/powershell.exe"
     )
-    script = SCRIPT.with_name("attachments.ps1") if operation == "download_attachments" else SCRIPT
     with tempfile.TemporaryDirectory(prefix="office-action-") as directory:
         request = Path(directory) / "request.json"
         result = Path(directory) / "result.json"
@@ -118,7 +158,7 @@ def invoke(operation: str, arguments: dict) -> dict:
                 "-NonInteractive",
                 "-STA",
                 "-File",
-                str(script),
+                str(SCRIPT),
                 "-RequestFile",
                 str(request),
                 "-ResultFile",

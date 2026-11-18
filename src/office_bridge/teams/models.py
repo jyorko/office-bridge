@@ -50,6 +50,7 @@ class TeamsWebStatus(BaseModel):
     backend: Literal["chromium", "msedge", "webview2"]
     account_verified: bool | None = None
     host_visible: bool | None = None
+    audio_muted: bool | None = None
     control_visible: bool | None = None
     host_focused: bool | None = None
     host_owned: bool | None = None

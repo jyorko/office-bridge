@@ -3,6 +3,7 @@
 ## Scope and tools
 
 - For using the MCP, read `.agents/skills/office-bridge-mcp/SKILL.md` and the relevant workflow reference. Work tracking requires a user-authorized session/chat opt-in; do not infer it from a passive read or an installation check.
+- For Outlook mail, Teams messages, and send receipts, use the [presentation workflow](.agents/skills/office-bridge-mcp/references/presentation.md) to display the existing result in native MCP Apps, inline in T3, or in the isolated window for standalone clients.
 
 - Use the community `actions-runtime` and `actions-core` packages from `joshyorko/actions`. Do not replace the official server with a custom MCP or HTTP server.
 - All subagents must use LUNA unless the user explicitly authorizes another model.
@@ -40,4 +41,4 @@
 - Never replay a historical send test or use a send as a bootstrap check. Inspect existing send history before any separately authorized send test.
 - Rebuild the SDK with its pinned package and DLL hash checks. Do not commit downloaded artifacts. Update `docs/api/openapi.json` with `action-server devenv --datadir .state/tasks task export-openapi` when the API changes.
 - Inspect the staged diff and scan for private data before committing or pushing. Keep documentation aligned with actual lifecycle paths and installed versions.
-- Report reproducible Action Server bugs upstream to `https://github.com/joshyorko/actions/issues` with sanitized steps, versions, expected/actual behavior, and relevant logs. The user authorizes these reports. Resolve package configuration and local integration mistakes here; never publish credentials, corporate messages, receipts, or private identifiers in a report.
+- Use `.agents/skills/actions-upstream-reporting/SKILL.md` to triage possible Action Server defects. Report reproducible bugs upstream to `https://github.com/joshyorko/actions/issues` with sanitized steps, versions, expected/actual behavior, and relevant logs. The user authorizes these reports. Resolve package configuration and local integration mistakes here; never publish credentials, corporate messages, receipts, or private identifiers in a report.

@@ -8,7 +8,7 @@ import package_layout
 import prepare_state
 import pytest
 
-from office_bridge.runtime import local_state, supervisor
+from office_bridge.runtime import local_state, outlook_supervisor, supervisor
 
 
 @pytest.mark.parametrize("dev", [False, True])
@@ -27,7 +27,9 @@ def test_launch_modes_use_loopback_and_selected_port_without_api_key(tmp_path, m
     monkeypatch.setattr(
         prepare_state, "prepare_local_state", lambda **kwargs: prepared.append(kwargs)
     )
-    monkeypatch.setattr(supervisor, "start", lambda root: None)
+    started = []
+    monkeypatch.setattr(supervisor, "start", lambda root: started.append(("teams", root)))
+    monkeypatch.setattr(outlook_supervisor, "start", lambda root: started.append(("outlook", root)))
     monkeypatch.setattr(actions.server.cli, "main", lambda args: arguments.extend(args))
     monkeypatch.setattr(sys, "argv", ["run_server.py"] + (["--dev"] if dev else []))
     path = Path(__file__).resolve().parents[1] / "scripts/run_server.py"
@@ -39,4 +41,5 @@ def test_launch_modes_use_loopback_and_selected_port_without_api_key(tmp_path, m
     assert arguments[arguments.index("--port") + 1] == "0"
     assert arguments[arguments.index("--address") + 1] == "127.0.0.1"
     assert prepared == [{"dev": dev, "teams_account": "fixture@example.com"}]
+    assert [name for name, _ in started] == ["teams", "outlook"]
     assert "OFFICE_BRIDGE_TEAMS_ACCOUNT" not in os.environ

@@ -9,6 +9,8 @@ Use the registered `desktop-office` MCP connection and its live action catalog. 
 
 If the client is disconnected, read `.state/server.json` and use its recorded `mcp_url`. The endpoint is loopback and ends in `/mcp`; the full API schema is at the same origin's `/openapi.json`. The port can change. Do not guess it or start another server over a recorded one.
 
+For a possible Actions Runtime or Core defect, use `actions-upstream-reporting` to reproduce, establish ownership and report the confirmed framework error under the repo's existing authorization.
+
 Discover the live action catalog with paginated MCP `tools/list` before choosing an action. `server/discover` describes protocol support, not the tool catalog. Use the returned names and input schemas as the call contract; consult the API schema and repo source when behavior needs clarification. Stop if the requested action is absent or its identity/schema is ambiguous.
 
 For a user-installed copy, read `references/installation.md` to locate the owning checkout. Resolve state and lifecycle scripts there, rather than in an unrelated current working directory.
@@ -22,3 +24,4 @@ Read the relevant guide only when using that area:
 - [Teams actions](references/teams.md) for chat lookup, read, send, edit, links, and reactions.
 - [Work tracking](references/work-tracking.md) for opt-in Eyes claims on assigned task messages.
 - [Copilot, Outlook, and evidence packs](references/office-workflows.md) for those action families.
+- [Message presentation](references/presentation.md) for Outlook and Teams views in native MCP Apps, inline in T3, or in the isolated window for standalone clients.
