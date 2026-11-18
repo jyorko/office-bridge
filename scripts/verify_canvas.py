@@ -181,6 +181,7 @@ def mail_fixtures():
         recipients=[],
         body_text="Please review the workshop agenda.",
         body_truncated=False,
+        can_create_reply_draft=True,
     )
     body = "I can review the agenda."
     draft = ReplyDraft(

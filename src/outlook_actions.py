@@ -50,14 +50,20 @@ def outlook_inbox_list(limit: Limit = 20, unread_only: bool = False) -> MessageR
 def outlook_get_message(message: MessageRef) -> MessageResponse[MessageDetail]:
     """Read one exact message with its body capped at 20000 characters.
 
-    This operation fails closed when Outlook does not expose an exact message
-    identity. Draft, reply, attachment, send, and archive actions are unavailable.
+    Reads require one verified non-draft item in the selected conversation.
+    Reply controls require a complete source version and an available composer route.
 
     Args:
         message: A conversation reference from a list, or an exact message
             reference returned by an earlier read.
     """
-    return with_presentation(desktop.run("get_message", MessageDetail, message=message))
+    response = desktop.run("get_message", MessageDetail, message=message)
+    if response.result is not None:
+        response.result.can_create_reply_draft = (
+            response.result.can_create_reply_draft
+            and "create_reply_draft" in desktop.OUTLOOK_SUPPORTED
+        )
+    return with_presentation(response)
 
 
 @tool(read_only_hint=True, open_world_hint=False, meta=MESSAGE_UI)

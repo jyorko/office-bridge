@@ -78,6 +78,25 @@ def test_scan_returns_exact_conversation_identity_and_bounded_metadata(page):
     assert "modified_at" not in result["rows"][0]["version"]
 
 
+def test_icon_font_glyphs_do_not_replace_the_inbox_subject(page):
+    set_inbox(page)
+    page.locator('[data-convid="conversation-001"]').evaluate(
+        """row => {
+          const icon = document.createElement('span');
+          icon.textContent = '\\uE1BB';
+          row.insertBefore(icon, row.children[1]);
+          const another = document.createElement('span');
+          another.setAttribute('data-testid', 'subject-icon');
+          another.textContent = '\\uEB68';
+          row.insertBefore(another, row.children[2]);
+        }"""
+    )
+    result = run_script(page, {"phase": "scan", "step": "start"})
+    assert result["rows"][0]["subject"] == "Quarterly update"
+    assert "\ue1bb" not in result["rows"][0]["lines"]
+    assert "\ueb68" not in result["rows"][0]["lines"]
+
+
 def test_scan_opens_only_the_unique_inbox_folder_and_preserves_composers(page):
     set_inbox(page, selected=False)
     navigated = run_script(page, {"phase": "scan", "step": "start"})
@@ -349,7 +368,8 @@ def test_create_draft_uses_resolved_recipient_and_returns_exact_draft_id(page):
             dialog.innerHTML = '<input aria-label="To">' +
               '<input aria-label="Subject">' +
               '<div contenteditable="true" aria-label="Message body"></div>' +
-              '<button>Send</button><span aria-label="Saved"></span>';
+              '<button>Send</button><button aria-label="Close"></button>' +
+              '<span aria-label="Saved"></span>';
             document.body.append(dialog);
           });
         </script>"""
@@ -411,4 +431,58 @@ def test_new_mail_never_replaces_an_existing_composer(page):
     )
     result = run_script(page, {"phase": "new_mail"})
     assert result["state"] == "draft_exists"
+
+
+def test_reply_without_dom_item_id_uses_only_the_verified_selected_conversation(page):
+    set_inbox(page)
+    page.locator("[role=document]").evaluate(
+        """body => {
+          body.removeAttribute('data-itemid');
+          const button = document.createElement('button');
+          button.setAttribute('aria-label', 'Reply');
+          button.textContent = 'Reply';
+          button.addEventListener('click', () => document.body.dataset.replyClicks = '1');
+          body.parentElement.append(button);
+        }"""
+    )
+    page.locator('[data-convid="conversation-001"]').evaluate(
+        "(row) => row.setAttribute('aria-selected', 'true')"
+    )
+    assert (
+        run_script(
+            page,
+            {"phase": "reply", "message_id": "service-item", "conversation_id": "conversation-002"},
+        )["state"]
+        == "message_not_found"
+    )
+    assert page.locator("body").get_attribute("data-reply-clicks") is None
+    assert (
+        run_script(
+            page,
+            {"phase": "reply", "message_id": "service-item", "conversation_id": "conversation-001"},
+        )["state"]
+        == "composer_opening"
+    )
+    assert page.locator("body").get_attribute("data-reply-clicks") == "1"
+
+
+def test_send_rejects_changed_body_before_clicking(page):
+    page.set_content(
+        '<div role="dialog"><input aria-label="Subject" value="Subject">'
+        '<div aria-label="Message body" contenteditable="true">Edited body</div>'
+        '<span data-email="self@example.invalid">Self</span><button>Send</button></div>'
+        '<script>document.querySelector("button").onclick = () => '
+        'document.body.dataset.sendClicks = "1";</script>'
+    )
+    before = run_script(page, {"phase": "composer_state"})
+    args = {
+        "phase": "send",
+        "subject": "Subject",
+        "body_text": "Inspected body",
+        "recipients": before["recipients"],
+    }
+    assert run_script(page, args)["state"] == "stale_draft"
+    assert page.locator("body").get_attribute("data-send-clicks") is None
+    assert run_script(page, {**args, "body_text": "Edited body"})["state"] == "send_clicked"
+    assert page.locator("body").get_attribute("data-send-clicks") == "1"
     assert page.get_by_role("dialog").count() == 1

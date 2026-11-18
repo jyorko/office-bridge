@@ -1,4 +1,4 @@
-"""Fixed, bounded JSON-file boundary to Windows PowerShell. No shell interpolation."""
+"""Bounded clients for persistent Office hosts and legacy desktop Teams reads."""
 
 import json
 import os
@@ -65,6 +65,7 @@ OUTLOOK_OPERATIONS = {
     "archive": "outlook_archive",
     "download_attachments": "outlook_download_attachments",
 }
+# Publish writes only after the host passes live mailbox acceptance.
 OUTLOOK_SUPPORTED = frozenset({"inbox_list", "get_message", "search_inbox"})
 OUTLOOK_UNCERTAIN_MUTATIONS = frozenset(
     {"create_reply_draft", "create_mail_draft", "send_draft", "archive"}
@@ -136,7 +137,6 @@ def invoke(operation: str, arguments: dict) -> dict:
         Path(os.environ.get("SystemRoot", r"C:\Windows"))
         / "System32/WindowsPowerShell/v1.0/powershell.exe"
     )
-    script = SCRIPT.with_name("attachments.ps1") if operation == "download_attachments" else SCRIPT
     with tempfile.TemporaryDirectory(prefix="office-action-") as directory:
         request = Path(directory) / "request.json"
         result = Path(directory) / "result.json"
@@ -153,7 +153,7 @@ def invoke(operation: str, arguments: dict) -> dict:
                 "-NonInteractive",
                 "-STA",
                 "-File",
-                str(script),
+                str(SCRIPT),
                 "-RequestFile",
                 str(request),
                 "-ResultFile",

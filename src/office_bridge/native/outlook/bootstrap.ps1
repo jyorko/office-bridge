@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $sdk = Join-Path $env:LOCALAPPDATA 'OfficeActionServer\webview2-sdk\1.0.4314.35'
 $env:OFFICE_OUTLOOK_SCRIPT_FILE = Join-Path $PSScriptRoot 'mail.js'
+$env:OFFICE_OUTLOOK_SOURCE_HASH = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'OutlookSession.cs') -Algorithm SHA256).Hash.ToLowerInvariant()
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -Path (Join-Path $sdk 'Microsoft.Web.WebView2.Core.dll')
 Add-Type -Path (Join-Path $PSScriptRoot 'OutlookSession.cs') -ReferencedAssemblies @(

@@ -35,20 +35,31 @@ $filter = $type.GetMethod('MailResponseAction', $static)
 function Filter([string]$url) { $filter.Invoke($null, @($url)) }
 if ((Filter 'https://outlook.office.com/owa/service.svc?action=GetConversationItems') -ne 'GetConversationItems') { throw 'Allowlisted action rejected' }
 if ((Filter 'https://outlook.cloud.microsoft/owa/0/service.svc?action=GetConversationItems') -ne 'GetConversationItems') { throw 'Numbered mailbox path rejected' }
+if ((Filter 'https://outlook.cloud.microsoft/owa/me/service.svc?action=GetConversationItems') -ne 'GetConversationItems') { throw 'Current mailbox path rejected' }
+if ((Filter 'https://outlook.office.com/api/beta/me/Microsoft.OutlookServices.GetConversationItems') -ne 'RestItems') { throw 'REST conversation route rejected' }
+if ((Filter 'https://outlook.office.com/ows/v1.0/mailbox/items/message') -ne 'RestItems') { throw 'REST item route rejected' }
+if ((Filter 'https://outlook.office.com/owa/service.svc?app=Mail') -ne 'MailService') { throw 'Unlabelled mail RPC route rejected' }
+foreach ($action in @('GetItem','CreateItem','UpdateItem','FindItem','MoveItem','SendItem')) {
+    if ((Filter ('https://outlook.office.com/owa/service.svc?action='+$action)) -cne $action) { throw 'Item action rejected' }
+}
 foreach ($url in @(
-    'https://outlook.office.com/owa/service.svc?action=GetItem',
+    'https://outlook.office.com/owa/service.svc?action=DeleteItem',
     'https://example.invalid/owa/service.svc?action=GetConversationItems',
     'https://outlook.office.com.evil.invalid/owa/service.svc?action=GetConversationItems',
     'https://outlook.office.com:444/owa/service.svc?action=GetConversationItems',
     'https://user@outlook.office.com/owa/service.svc?action=GetConversationItems',
     'http://outlook.office.com/owa/service.svc?action=GetConversationItems',
     'https://outlook.office.com/other?action=GetConversationItems',
+    'https://outlook.office.com/owa/a/b/service.svc?action=GetConversationItems',
+    'https://outlook.office.com/api/beta/me/messages/item/attachments/file/$value',
     'https://outlook.office.com/owa/service.svc?action=GetConversationItems&action=GetItem'
 )) {
     if ((Filter $url) -ne '') { throw 'Unexpected action accepted' }
 }
 $probe = [Runtime.Serialization.FormatterServices]::GetUninitializedObject($type)
 $type.GetField('responseProbeConversation', $instance).SetValue($probe, 'conversation-a')
+$type.GetField('responseItemFields', $instance).SetValue($probe, (New-Object 'Collections.Generic.HashSet[string]'))
+$type.GetField('responseIdentityFields', $instance).SetValue($probe, (New-Object 'Collections.Generic.HashSet[string]'))
 $json = New-Object System.Web.Script.Serialization.JavaScriptSerializer
 $result = $json.DeserializeObject('{"ResponseMessages":[{"ConversationId":{"Id":"conversation-a"},"Items":[{"ItemId":{"Id":"item-a","ChangeKey":"version-a"},"Body":{"Value":"synthetic"}}]},{"ConversationId":{"Id":"conversation-b"}}]}')
 $type.GetMethod('CountResponseShape', $instance).Invoke($probe, @($result))
@@ -63,6 +74,23 @@ foreach ($pair in @{
         throw 'Unexpected shape count'
     }
 }
+$parse = $type.GetMethod('DeserializeMailResponse', $static)
+$reduce = $type.GetMethod('ObservedItems', $static)
+$response = '{"__type":"GetConversationItemsJsonResponse:#Exchange","Body":{"__type":"GetConversationItemsResponse:#Exchange","ConversationId":{"Id":"conversation-a"},"Items":[{"__type":"Message:#Exchange","ItemId":{"Id":"item-a","ChangeKey":"version-a"},"IsDraft":false,"HasAttachments":false,"ToRecipients":[{"Mailbox":{"EmailAddress":"self@example.test","Name":"Self"}}],"CcRecipients":[],"Body":{"Value":"literal {\"__type\":\"unchanged\"}"}}]}}'
+$parsed = $parse.Invoke($null, @($response))
+$records = $reduce.Invoke($null, @($parsed))
+if ($records.Count -ne 1 -or $records['conversation-a'].Count -ne 1) { throw 'Parent conversation identity was lost' }
+$record = $records['conversation-a'][0]
+if ($record['entry_id'] -cne 'item-a' -or -not $record['complete'] -or $record['is_draft']) { throw 'Typed response was not reduced' }
+if ($json.Serialize($records).Contains('unchanged')) { throw 'Response body retained' }
+if ($parsed['Body']['Items'][0]['Body']['Value'] -cne 'literal {"__type":"unchanged"}') { throw 'Body text changed during parsing' }
+$graph = $parse.Invoke($null, @('{"id":"graph-item","changeKey":"graph-version","conversationId":"graph-conversation","isDraft":false,"hasAttachments":false,"toRecipients":[{"emailAddress":{"name":"Self","address":"self@example.test"}}],"ccRecipients":[],"from":{"emailAddress":{"name":"Sender","address":"sender@example.test"}}}'))
+$records = $reduce.Invoke($null, @($graph))
+$record = $records['graph-conversation'][0]
+if (-not $record['complete'] -or $record['recipients'][0]['smtp_address'] -cne 'self@example.test' -or $record['sender']['smtp_address'] -cne 'sender@example.test') { throw 'REST metadata was not reduced' }
+$withoutVersion = $parse.Invoke($null, @('{"id":"known-item","conversationId":"known-conversation","isDraft":false,"hasAttachments":false,"toRecipients":[],"ccRecipients":[]}'))
+$records = $reduce.Invoke($null, @($withoutVersion))
+if ($records['known-conversation'][0]['complete'] -or -not $records['known-conversation'][0]['draft_known']) { throw 'Missing change key was invented' }
 """,
         encoding="utf-8",
     )

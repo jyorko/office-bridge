@@ -47,6 +47,7 @@ public sealed class OutlookSession : ApplicationContext
     readonly VerificationWindow host = new VerificationWindow();
     readonly string sdk, profile, pipeName, generation, expectedAccount;
     readonly string storeIdentity;
+    readonly string sourceHash = Environment.GetEnvironmentVariable("OFFICE_OUTLOOK_SOURCE_HASH") ?? "";
     readonly int parentId;
     readonly bool visible;
     readonly CancellationTokenSource stop = new CancellationTokenSource();
@@ -77,11 +78,32 @@ public sealed class OutlookSession : ApplicationContext
     int responseProbeConversationMatches;
     int responseProbeChangeKeys;
     int responseProbeBodies;
+    readonly HashSet<string> responseItemFields = new HashSet<string>();
+    readonly HashSet<string> responseIdentityFields = new HashSet<string>();
+    readonly HashSet<string> responseRoutes = new HashSet<string>();
+    readonly HashSet<string> responseActions = new HashSet<string>();
+    readonly HashSet<string> responseActionRoutes = new HashSet<string>();
+    readonly HashSet<string> responseRootFields = new HashSet<string>();
+    readonly HashSet<string> responseRestOperations = new HashSet<string>();
+    readonly HashSet<string> batchShapes = new HashSet<string>();
+    int responseEventCount;
+    int responseAcceptedCount;
+    int responseParsedCount;
+    string responseReadFailure = "";
+    string responseReadStage = "";
     bool initializing;
     // Bounded identity metadata from Outlook's own conversation responses. No bodies.
     readonly Dictionary<string, List<Dictionary<string, object>>> observedConversations =
         new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.Ordinal);
     readonly Queue<string> observedOrder = new Queue<string>();
+    readonly Dictionary<string, Dictionary<string, object>> observedMessages =
+        new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
+    readonly HashSet<string> createdDraftIds = new HashSet<string>(StringComparer.Ordinal);
+    readonly HashSet<string> movedItemIds = new HashSet<string>(StringComparer.Ordinal);
+    CoreWebView2DownloadOperation pendingDownload = null;
+    string pendingDownloadPath = "";
+    bool allowDownload = false;
+    bool mutationStarted = false;
 
     static readonly HashSet<string> SafeErrors = new HashSet<string>(StringComparer.Ordinal) {
         "invalid_request", "not_ready", "needs_interactive_login", "access_blocked",
@@ -396,6 +418,19 @@ public sealed class OutlookSession : ApplicationContext
             };
             core.BasicAuthenticationRequested += (s, e) => { e.Cancel = true; };
             core.WebResourceResponseReceived += async (s, e) => await ObserveMailResponse(e);
+            core.DownloadStarting += (s, e) =>
+            {
+                if (!allowDownload || pendingDownload != null ||
+                    String.IsNullOrEmpty(pendingDownloadPath))
+                {
+                    e.Cancel = true;
+                    e.Handled = true;
+                    return;
+                }
+                pendingDownload = e.DownloadOperation;
+                e.ResultFilePath = pendingDownloadPath;
+                e.Handled = true;
+            };
             core.NavigationStarting += (s, e) =>
             {
                 Uri target;
@@ -440,10 +475,26 @@ public sealed class OutlookSession : ApplicationContext
             !(uri.Host.Equals("outlook.office.com", StringComparison.OrdinalIgnoreCase) ||
               uri.Host.Equals("outlook.office365.com", StringComparison.OrdinalIgnoreCase) ||
               uri.Host.Equals("outlook.cloud.microsoft", StringComparison.OrdinalIgnoreCase)) ||
-            !Regex.IsMatch(uri.AbsolutePath, "^/owa/(?:[0-9]+/)?service\\.svc$",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+            uri.AbsolutePath.Length > 8192 ||
             uri.Query.Length > 4096)
             return "";
+        // Outlook's gateway uses opaque RPC paths for its mail data. The
+        // reducer below selects message metadata and ignores other payloads.
+        if (Regex.IsMatch(uri.AbsolutePath, "^/ows/api/[^/]+(?:/[^/]+)*/?$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            return "OutlookApi";
+        if (Regex.IsMatch(uri.AbsolutePath, "^/(?:ows/)?(?:api/)?(?:v1\\.0|v2\\.0|beta)/",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) &&
+            Regex.IsMatch(uri.AbsolutePath, "/(?:Microsoft\\.OutlookServices\\.)?(?:messages|items|conversations|conversationitems|GetConversationItems|GetConversationParts|GetConversationMessageParts|GetItem|FindItem)(?:\\(|/|$)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) &&
+            !Regex.IsMatch(uri.AbsolutePath, "/(?:attachments|\\$value)(?:\\(|/|$)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            return "RestItems";
+        if (Regex.IsMatch(uri.AbsolutePath, "^/(?:ows/)?api/(?:v1\\.0|v2\\.0|beta)/(?:[^/]+/){0,4}\\$batch/?$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            return "MailBatch";
+        if (!Regex.IsMatch(uri.AbsolutePath, "^/owa/(?:[a-z0-9_-]{1,128}/)?service\\.svc$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return "";
         string action = "";
         int actionCount = 0;
         foreach (string pair in uri.Query.TrimStart('?').Split('&'))
@@ -454,9 +505,15 @@ public sealed class OutlookSession : ApplicationContext
             actionCount++;
             action = Uri.UnescapeDataString(pair.Substring(equals + 1));
         }
+        // Current Outlook also sends the RPC action outside the URL. Inspect
+        // only bounded response bodies; never read request or response headers.
+        if (actionCount == 0) return "MailService";
         if (actionCount != 1) return "";
         if (action.Equals("GetConversationItems", StringComparison.OrdinalIgnoreCase))
             return "GetConversationItems";
+        foreach (string supported in new[] { "CreateItem", "UpdateItem", "FindItem",
+                "GetItem", "MoveItem", "SendItem" })
+            if (action.Equals(supported, StringComparison.OrdinalIgnoreCase)) return supported;
         return "";
     }
 
@@ -471,8 +528,18 @@ public sealed class OutlookSession : ApplicationContext
             var map = node as Dictionary<string, object>;
             if (map != null)
             {
+                if (map.Keys.Any(key => key.Equals("ItemId", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("ConversationId", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("ChangeKey", StringComparison.OrdinalIgnoreCase)))
+                {
+                    foreach (string key in map.Keys.Take(100)) responseItemFields.Add(key);
+                    var identity = Field(map, "ItemId") as Dictionary<string, object>;
+                    if (identity != null)
+                        foreach (string key in identity.Keys) responseIdentityFields.Add(key);
+                }
                 foreach (var field in map)
                 {
+                    if (PrivateResponseField(field.Key)) continue;
                     if (field.Key.Equals("ItemId", StringComparison.OrdinalIgnoreCase))
                         responseProbeItemIds++;
                     if (field.Key.Equals("ConversationId", StringComparison.OrdinalIgnoreCase))
@@ -531,9 +598,12 @@ public sealed class OutlookSession : ApplicationContext
             {
                 var entry = raw as Dictionary<string, object>;
                 var mailbox = entry != null && entry.ContainsKey("Mailbox")
-                    ? entry["Mailbox"] as Dictionary<string, object> : entry;
+                    ? entry["Mailbox"] as Dictionary<string, object> :
+                    Field(entry, "EmailAddress") as Dictionary<string, object> ?? entry;
                 string address = mailbox == null ? "" :
                     (TextField(mailbox, "EmailAddress") ?? "").Trim().ToLowerInvariant();
+                if (Field(mailbox, "EmailAddress") is Dictionary<string, object> || address.Length == 0)
+                    address = TextField(mailbox, "Address").Trim().ToLowerInvariant();
                 if (!Regex.IsMatch(address, "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$") ||
                     address.Length > 254)
                 {
@@ -552,36 +622,92 @@ public sealed class OutlookSession : ApplicationContext
         return recipients;
     }
 
+    static Dictionary<string, object> ObservedSender(Dictionary<string, object> item)
+    {
+        var raw = Field(item, "From") as Dictionary<string, object>;
+        if (raw == null) raw = Field(item, "Sender") as Dictionary<string, object>;
+        var mailbox = raw == null ? null : Field(raw, "Mailbox") as Dictionary<string, object> ??
+            Field(raw, "EmailAddress") as Dictionary<string, object>;
+        if (mailbox == null) mailbox = raw;
+        string address = TextField(mailbox, "EmailAddress").Trim().ToLowerInvariant();
+        if (Field(mailbox, "EmailAddress") is Dictionary<string, object> || address.Length == 0)
+            address = TextField(mailbox, "Address").Trim().ToLowerInvariant();
+        if (!Regex.IsMatch(address, "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$") || address.Length > 254)
+            return null;
+        string name = TextField(mailbox, "Name");
+        if (name.Length == 0 || name.Length > 500) name = address;
+        return new Dictionary<string, object> {
+            { "display_name", name }, { "smtp_address", address },
+            { "recipient_type", 1 }
+        };
+    }
+
+    static List<Dictionary<string, object>> ObservedAttachments(Dictionary<string, object> item)
+    {
+        var result = new List<Dictionary<string, object>>();
+        var list = Field(item, "Attachments") as System.Collections.IList;
+        if (list == null || list.Count > 500) return result;
+        foreach (object value in list)
+        {
+            var attachment = value as Dictionary<string, object>;
+            string id = IdentityText(Field(attachment, "AttachmentId"));
+            if (id.Length == 0) id = IdentityText(Field(attachment, "Id"));
+            string name = TextField(attachment, "Name");
+            long size;
+            if (id.Length == 0 || name.Length == 0 || name.Length > 500 ||
+                !Int64.TryParse(TextField(attachment, "Size"), out size) || size < 0)
+                continue;
+            result.Add(new Dictionary<string, object> {
+                { "index", result.Count + 1 }, { "attachment_id", id },
+                { "filename", name }, { "size_bytes", size },
+                { "inline", BoolField(attachment, "IsInline") }
+            });
+        }
+        return result;
+    }
+
     // Reduce one parsed service response to per-conversation identity records.
     static Dictionary<string, List<Dictionary<string, object>>> ObservedItems(object root)
     {
         var found = new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.Ordinal);
-        var pending = new Stack<object>();
-        pending.Push(root);
+        var pending = new Stack<KeyValuePair<object, string>>();
+        pending.Push(new KeyValuePair<object, string>(root, ""));
         int visited = 0, records = 0;
         while (pending.Count > 0 && visited++ < 20000 && records < 200)
         {
-            object node = pending.Pop();
+            var context = pending.Pop();
+            object node = context.Key;
+            string inheritedConversation = context.Value;
             var map = node as Dictionary<string, object>;
             if (map == null)
             {
                 var list = node as System.Collections.IList;
                 if (list != null) foreach (object child in list)
                     if (child is Dictionary<string, object> || child is System.Collections.IList)
-                        pending.Push(child);
+                        pending.Push(new KeyValuePair<object, string>(child, inheritedConversation));
                 continue;
             }
+            string conversation = IdentityText(Field(map, "ConversationId"));
+            if (conversation.Length == 0) conversation = inheritedConversation;
             foreach (var field in map)
+                if (!PrivateResponseField(field.Key))
                 if (field.Value is Dictionary<string, object> ||
-                    field.Value is System.Collections.IList) pending.Push(field.Value);
-            if (!map.ContainsKey("ItemId") || !map.ContainsKey("ConversationId")) continue;
-            var identity = map["ItemId"] as Dictionary<string, object>;
+                    field.Value is System.Collections.IList)
+                    pending.Push(new KeyValuePair<object, string>(field.Value, conversation));
+            var identity = Field(map, "ItemId") as Dictionary<string, object>;
+            if (identity == null && map.ContainsKey("Id") &&
+                (map.ContainsKey("ChangeKey") || Field(map, "IsDraft") is bool))
+                identity = new Dictionary<string, object> {
+                    { "Id", map["Id"] }, { "ChangeKey", Field(map, "ChangeKey") }
+                };
+            if (identity == null) continue;
             string entry = IdentityText(identity);
             string changeKey = identity == null || !identity.ContainsKey("ChangeKey")
                 ? "" : IdentityText(identity["ChangeKey"]);
-            string conversation = IdentityText(map["ConversationId"]);
-            if (entry.Length == 0 || changeKey.Length == 0 || conversation.Length == 0) continue;
-            bool complete = map.ContainsKey("HasAttachments") && map["HasAttachments"] is bool &&
+            if (entry.Length == 0 || conversation.Length == 0 ||
+                changeKey.Length == 0 && !(Field(map, "IsDraft") is bool)) continue;
+            bool complete = changeKey.Length > 0 &&
+                map.ContainsKey("HasAttachments") && map["HasAttachments"] is bool &&
                 map.ContainsKey("IsDraft") && map["IsDraft"] is bool;
             var recipients = ObservedRecipients(map, ref complete);
             var record = new Dictionary<string, object> {
@@ -589,9 +715,14 @@ public sealed class OutlookSession : ApplicationContext
                 { "conversation_id", conversation },
                 { "is_draft", map.ContainsKey("IsDraft") && map["IsDraft"] is bool &&
                     (bool)map["IsDraft"] },
+                { "draft_known", map.ContainsKey("IsDraft") && map["IsDraft"] is bool },
                 { "has_attachments", map.ContainsKey("HasAttachments") &&
                     map["HasAttachments"] is bool && (bool)map["HasAttachments"] },
-                { "recipients", recipients }, { "complete", complete }
+                { "recipients", recipients }, { "complete", complete },
+                { "sender", ObservedSender(map) },
+                { "subject", TextField(map, "Subject").Length <= 1000 ? TextField(map, "Subject") : "" },
+                { "sent_at", TextField(map, "DateTimeSent").Length <= 40 ? TextField(map, "DateTimeSent") : "" },
+                { "attachments", ObservedAttachments(map) }
             };
             List<Dictionary<string, object>> items;
             if (!found.TryGetValue(conversation, out items))
@@ -603,7 +734,8 @@ public sealed class OutlookSession : ApplicationContext
                 records++;
             }
         }
-        return found;
+        return pending.Count == 0 ? found :
+            new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.Ordinal);
     }
 
     void RememberObserved(Dictionary<string, List<Dictionary<string, object>>> found)
@@ -617,6 +749,43 @@ public sealed class OutlookSession : ApplicationContext
                 observedOrder.Enqueue(pair.Key);
             }
             observedConversations[pair.Key] = pair.Value;
+            foreach (var record in pair.Value)
+            {
+                if (observedMessages.Count >= 500) observedMessages.Clear();
+                observedMessages[TextField(record, "entry_id")] = record;
+            }
+        }
+    }
+
+    void RememberMutationIdentities(object root, string action)
+    {
+        var pending = new Stack<object>();
+        pending.Push(root);
+        int visited = 0;
+        while (pending.Count > 0 && visited++ < 20000)
+        {
+            object node = pending.Pop();
+            var map = node as Dictionary<string, object>;
+            if (map == null)
+            {
+                var list = node as System.Collections.IList;
+                if (list != null) foreach (object child in list) pending.Push(child);
+                continue;
+            }
+            foreach (var field in map)
+                if (!PrivateResponseField(field.Key) &&
+                    (field.Value is Dictionary<string, object> || field.Value is System.Collections.IList))
+                    pending.Push(field.Value);
+            string id = IdentityText(Field(map, "ItemId"));
+            if (id.Length == 0 && map.ContainsKey("ChangeKey"))
+                id = IdentityText(Field(map, "Id"));
+            if (id.Length == 0) continue;
+            if (action == "CreateItem" &&
+                (activeOperation == "outlook_create_reply_draft" ||
+                 activeOperation == "outlook_create_mail_draft") && createdDraftIds.Count < 8)
+                createdDraftIds.Add(id);
+            if (action == "MoveItem" && activeOperation == "outlook_archive" &&
+                movedItemIds.Count < 8) movedItemIds.Add(id);
         }
     }
 
@@ -626,14 +795,63 @@ public sealed class OutlookSession : ApplicationContext
             responseProbeMatched < 8;
         try
         {
+            responseEventCount = Math.Min(responseEventCount + 1, 100000);
+            Uri route;
+            if (Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out route) &&
+                AllowedHosts.Take(3).Contains(route.Host) && responseRoutes.Count < 80)
+            {
+                string[] safe = { "owa", "ows", "mail", "api", "service.svc", "0", "1", "v1.0", "v2.0", "beta",
+                    "users", "me", "messages", "conversations", "conversationitems", "getconversationitems",
+                    "getitem", "items", "mailfolders", "conversationparts", "$batch" };
+                string path = String.Join("/", route.AbsolutePath.Split('/').Where(value =>
+                    value.Length > 0).Select(value => {
+                        string lowered = value.ToLowerInvariant();
+                        lowered = lowered.Replace("microsoft.outlookservices.", "");
+                        string name = lowered.Split('(')[0];
+                        return safe.Contains(name) ? name + (lowered.Contains("(") ? "(*)" : "") : "*";
+                    }).ToArray());
+                responseRoutes.Add(path);
+                if (responseRestOperations.Count < 80)
+                {
+                    string last = route.AbsolutePath.Trim('/').Split('/').LastOrDefault() ?? "";
+                    string name = last.Split('(')[0];
+                    if (Regex.IsMatch(name, "^[A-Za-z][A-Za-z0-9._-]{0,80}$") &&
+                        Regex.IsMatch(name, "get|read|message|mail|item|batch|sync|find|conversation|folder",
+                            RegexOptions.IgnoreCase))
+                        responseRestOperations.Add(name + ":" + e.Response.StatusCode + ":" + e.Request.Method);
+                }
+                if (route.AbsolutePath.EndsWith("/service.svc") && responseActions.Count < 80)
+                {
+                    foreach (string pair in route.Query.TrimStart('?').Split('&'))
+                        if (pair.StartsWith("action=", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string name = Uri.UnescapeDataString(pair.Substring(7));
+                            if (Regex.IsMatch(name, "^[A-Za-z]{1,80}$"))
+                            {
+                                responseActions.Add(name);
+                                string[] segments = route.AbsolutePath.Trim('/').Split('/');
+                                string kind = segments.Length != 3 ? "root" :
+                                    segments[1].Contains("%") ? "escaped_mailbox" :
+                                    segments[1].Contains("@") ? "mailbox_address" :
+                                    Regex.IsMatch(segments[1], "^[a-z0-9_-]+$", RegexOptions.IgnoreCase)
+                                        ? "slug" : "other";
+                                if (responseActionRoutes.Count < 100)
+                                    responseActionRoutes.Add(name + ":" + e.Response.StatusCode +
+                                        ":" + kind + ":" + route.Query.Length);
+                            }
+                        }
+                }
+            }
             string action = MailResponseAction(e.Request.Uri);
             if (String.IsNullOrEmpty(action) || e.Response.StatusCode != 200) return;
+            responseAcceptedCount++;
             if (probing)
             {
                 responseProbeBusy = true;
                 responseProbeMatched++;
                 responseProbeGetConversationItems++;
             }
+            responseReadStage = "response_content";
             using (Stream stream = await e.Response.GetContentAsync())
             {
                 if (stream == null) { if (probing) responseProbeEmpty++; return; }
@@ -651,13 +869,34 @@ public sealed class OutlookSession : ApplicationContext
                         memory.Write(buffer, 0, read);
                     }
                     if (memory.Length == 0) { if (probing) responseProbeEmpty++; return; }
-                    var parser = new JavaScriptSerializer {
-                        MaxJsonLength = MaxFrame, RecursionLimit = 64
-                    };
-                    object parsed = parser.DeserializeObject(
-                        Encoding.UTF8.GetString(memory.ToArray()));
+                    responseReadStage = "json_parse";
+                    object parsed = DeserializeMailResponse(Encoding.UTF8.GetString(memory.ToArray()));
                     if (parsed == null) return;
+                    responseParsedCount++;
+                    var rootMap = parsed as Dictionary<string, object>;
+                    if (rootMap != null)
+                        foreach (string key in rootMap.Keys.Take(40))
+                            if (responseRootFields.Count < 100) responseRootFields.Add(key);
+                    if (action == "MailService")
+                    {
+                        string kind = TextField(rootMap, "_outlook_type");
+                        foreach (string candidate in new[] { "CreateItem", "UpdateItem", "MoveItem",
+                            "SendItem", "GetConversationItems", "GetItem", "FindItem" })
+                            if (Regex.IsMatch(kind, "^" + candidate + "(?:Json)?Response(?:[:#]|$)"))
+                                action = candidate;
+                    }
+                    if (action == "MailBatch")
+                    {
+                        DescribeBatch(parsed);
+                        parsed = MailBatchBodies(parsed);
+                    }
+                    responseReadStage = "identity_reduce";
                     var found = ObservedItems(parsed);
+                    if (responseParsedCount <= 20) CountResponseShape(parsed);
+                    string mutationAction = action;
+                    if (action == "RestItems" && e.Request.Method == "POST")
+                        mutationAction = activeOperation == "outlook_archive" ? "MoveItem" : "CreateItem";
+                    RememberMutationIdentities(parsed, mutationAction);
                     if (host.InvokeRequired)
                         host.BeginInvoke(new Action(() => RememberObserved(found)));
                     else RememberObserved(found);
@@ -669,7 +908,11 @@ public sealed class OutlookSession : ApplicationContext
                 }
             }
         }
-        catch (Exception) { if (probing) responseProbeReadErrors++; }
+        catch (Exception exception)
+        {
+            responseReadFailure = exception.GetType().Name;
+            if (probing) responseProbeReadErrors++;
+        }
         finally { if (probing) responseProbeBusy = false; }
     }
 
@@ -688,7 +931,130 @@ public sealed class OutlookSession : ApplicationContext
             { "selected_conversation_match_count", responseProbeConversationMatches },
             { "change_key_field_count", responseProbeChangeKeys },
             { "body_field_count", responseProbeBodies }
+            ,{ "item_fields", responseItemFields.OrderBy(value => value).Take(100).ToArray() }
+            ,{ "identity_fields", responseIdentityFields.OrderBy(value => value).Take(20).ToArray() }
+            ,{ "response_event_count", responseEventCount }
+            ,{ "accepted_response_count", responseAcceptedCount }
+            ,{ "parsed_response_count", responseParsedCount }
+            ,{ "read_failure_type", responseReadFailure }
+            ,{ "read_stage", responseReadStage }
+            ,{ "routes", responseRoutes.ToArray() }
+            ,{ "actions", responseActions.ToArray() }
+            ,{ "action_routes", responseActionRoutes.ToArray() }
+            ,{ "source_sha256", sourceHash }
+            ,{ "root_fields", responseRootFields.ToArray() }
+            ,{ "rest_operations", responseRestOperations.ToArray() }
+            ,{ "batch_shapes", batchShapes.ToArray() }
         };
+    }
+
+    static object DeserializeMailResponse(string text)
+    {
+        // Outlook includes WCF __type discriminators. JavaScriptSerializer tries
+        // to instantiate those types even for DeserializeObject. Keep them inert.
+        // Escaped quotes inside JSON string values cannot match a property key.
+        string inert = Regex.Replace(text, "([\\{,])\\s*\"__type\"\\s*:",
+            "$1\"_outlook_type\":", RegexOptions.CultureInvariant);
+        var parser = new JavaScriptSerializer { MaxJsonLength = MaxFrame, RecursionLimit = 64 };
+        object parsed = parser.DeserializeObject(inert);
+        NormalizeMailFields(parsed);
+        return parsed;
+    }
+
+    static void NormalizeMailFields(object root)
+    {
+        string[] names = { "ItemId", "ConversationId", "ChangeKey", "Id", "IsDraft",
+            "HasAttachments", "ToRecipients", "CcRecipients", "BccRecipients", "From", "Sender",
+            "Mailbox", "EmailAddress", "Address", "Name", "Subject", "DateTimeSent",
+            "Attachments", "AttachmentId", "Size", "IsInline" };
+        var pending = new Stack<object>();
+        pending.Push(root);
+        int visited = 0;
+        while (pending.Count > 0 && visited++ < 20000)
+        {
+            object node = pending.Pop();
+            var map = node as Dictionary<string, object>;
+            if (map == null)
+            {
+                var list = node as System.Collections.IList;
+                if (list != null) foreach (object child in list) pending.Push(child);
+                continue;
+            }
+            foreach (string key in map.Keys.ToArray())
+            {
+                string canonical = names.FirstOrDefault(name =>
+                    name.Equals(key, StringComparison.OrdinalIgnoreCase));
+                if (key == "sentDateTime" || key == "SentDateTime") canonical = "DateTimeSent";
+                if (canonical != null && canonical != key && !map.ContainsKey(canonical))
+                {
+                    map[canonical] = map[key];
+                    map.Remove(key);
+                }
+            }
+            foreach (var field in map)
+                if (!PrivateResponseField(field.Key) &&
+                    (field.Value is Dictionary<string, object> || field.Value is System.Collections.IList))
+                    pending.Push(field.Value);
+        }
+    }
+
+    static bool PrivateResponseField(string key)
+    {
+        return key.Equals("Headers", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("Cookies", StringComparison.OrdinalIgnoreCase) ||
+            key.IndexOf("token", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            key.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static object MailBatchBodies(object root)
+    {
+        var map = root as Dictionary<string, object>;
+        var responses = (Field(map, "responses") ?? Field(map, "Responses")) as System.Collections.IList;
+        var bodies = new List<object>();
+        if (responses == null || responses.Count > 100) return bodies;
+        foreach (object raw in responses)
+        {
+            var response = raw as Dictionary<string, object>;
+            int status;
+            if (!Int32.TryParse(Convert.ToString(Field(response, "status") ??
+                Field(response, "Status")), out status) || status != 200) continue;
+            object body = Field(response, "body") ?? Field(response, "Body");
+            if (body is Dictionary<string, object> || body is System.Collections.IList)
+                bodies.Add(body);
+        }
+        return bodies;
+    }
+
+    void DescribeBatch(object root)
+    {
+        var map = root as Dictionary<string, object>;
+        object value = Field(map, "responses") ?? Field(map, "Responses");
+        if (batchShapes.Count < 30)
+            batchShapes.Add("responses:" + (value == null ? "null" : value.GetType().Name));
+        var responses = value as System.Collections.IList;
+        if (responses == null) return;
+        foreach (object raw in responses.Cast<object>().Take(5))
+        {
+            var response = raw as Dictionary<string, object>;
+            if (response == null || batchShapes.Count >= 30) continue;
+            batchShapes.Add("response_fields:" + String.Join(",", response.Keys.Where(key =>
+                !PrivateResponseField(key) && Regex.IsMatch(key, "^[A-Za-z_][A-Za-z0-9_]{0,40}$"))
+                .Take(30).ToArray()));
+            foreach (var field in response)
+            {
+                if (PrivateResponseField(field.Key) || !Regex.IsMatch(field.Key,
+                    "^(?:body|responseBody|status|statusCode)$", RegexOptions.IgnoreCase)) continue;
+                string kind = field.Value == null ? "null" : field.Value.GetType().Name;
+                var body = field.Value as Dictionary<string, object>;
+                if (body != null) kind += ":" + String.Join(",", body.Keys.Where(key =>
+                    !PrivateResponseField(key) && Regex.IsMatch(key, "^[A-Za-z_][A-Za-z0-9_]{0,40}$"))
+                    .Take(30).ToArray());
+                string text = field.Value as string;
+                if (text != null) kind += ":json=" + (text.TrimStart().StartsWith("{") ||
+                    text.TrimStart().StartsWith("[")).ToString();
+                if (batchShapes.Count < 30) batchShapes.Add(field.Key + ":" + kind);
+            }
+        }
     }
 
     void TrackFrame(CoreWebView2Frame frame)
@@ -825,6 +1191,7 @@ public sealed class OutlookSession : ApplicationContext
             { "foreground_interference", false }, { "restart_required", false },
             { "audio_muted", controller.CoreWebView2.IsMuted },
             { "generation", generation }, { "hostname", main["hostname"] },
+            { "source_sha256", sourceHash },
             { "navigation_host", navigationHost }, { "navigation_result", navigationResult },
             { "profile_control_count", profileCount },
             { "profile_control_trigger_count", profileTriggerCount },
@@ -869,7 +1236,8 @@ public sealed class OutlookSession : ApplicationContext
     async Task<Dictionary<string, object>> RequireAuthenticated()
     {
         Dictionary<string, object> status = null;
-        for (int attempt = 0; attempt < 8; attempt++)
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
         {
             status = await Inspect();
             if (status.ContainsKey("account_verified") &&
@@ -877,11 +1245,12 @@ public sealed class OutlookSession : ApplicationContext
                 return status;
             string state = status.ContainsKey("state")
                 ? Convert.ToString(status["state"]) : "identity_unverified";
-            if (state != "identity_unverified") break;
+            if (state != "identity_unverified" && state != "loading") break;
             await Task.Delay(400);
         }
-        throw new InvalidOperationException(status != null &&
-            status.ContainsKey("state") ? Convert.ToString(status["state"]) : "identity_unverified");
+        string failed = status != null && status.ContainsKey("state")
+            ? Convert.ToString(status["state"]) : "identity_unverified";
+        throw new InvalidOperationException(failed == "loading" ? "not_ready" : failed);
     }
 
     async Task<Dictionary<string, object>> ExecuteMailScript(Dictionary<string, object> request)
@@ -1008,6 +1377,28 @@ public sealed class OutlookSession : ApplicationContext
         return DigestValues(subject, body, addresses, expectedAccount, "");
     }
 
+    static string RecipientKey(List<Dictionary<string, object>> recipients)
+    {
+        return String.Join("\n", recipients.Select(recipient =>
+            TextField(recipient, "recipient_type") + ":" +
+            TextField(recipient, "smtp_address").ToLowerInvariant()).OrderBy(value => value).ToArray());
+    }
+
+    async Task RefreshMailbox()
+    {
+        var composer = await ExecuteMailScript(new Dictionary<string, object> {
+            { "phase", "composer_state" }
+        });
+        if (TextField(composer, "state") != "waiting")
+            throw new InvalidOperationException("draft_exists");
+        observedConversations.Clear();
+        observedMessages.Clear();
+        observedOrder.Clear();
+        controller.CoreWebView2.Reload();
+        await Task.Delay(1000);
+        await RequireAuthenticated();
+    }
+
     async Task<Dictionary<string, object>> WaitForComposer(int timeoutSeconds)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
@@ -1074,16 +1465,37 @@ public sealed class OutlookSession : ApplicationContext
         if (!String.IsNullOrWhiteSpace(subject) &&
             TextField(actual, "subject") != subject)
             throw new InvalidOperationException("mutation_outcome_unknown");
+        if (RecipientKey(recipients) != RecipientKey(expectedRecipients))
+            throw new InvalidOperationException("mutation_outcome_unknown");
         string digest = DraftDigest(TextField(actual, "subject"), body, recipients);
-        var closed = await ExecuteMailScript(new Dictionary<string, object> {
-            { "phase", "close_saved_draft" }
-        });
+        SetStage("draft_save_wait");
+        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
+        Dictionary<string, object> closed = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            closed = await ExecuteMailScript(new Dictionary<string, object> {
+                { "phase", "close_saved_draft" },
+                { "host_identity_verified", createdDraftIds.Count == 1 }
+            });
+            string state = TextField(closed, "state");
+            if (state == "draft_saved") break;
+            if (state != "draft_not_saved" && state != "draft_identity_unavailable")
+                throw new InvalidOperationException("mutation_outcome_unknown");
+            await Task.Delay(250);
+        }
         if (TextField(closed, "state") != "draft_saved")
             throw new InvalidOperationException("mutation_outcome_unknown");
         var saved = Field(closed, "draft") as Dictionary<string, object>;
         if (saved == null || TextField(saved, "body_text") != body ||
             TextField(saved, "subject") != TextField(actual, "subject"))
             throw new InvalidOperationException("mutation_outcome_unknown");
+        if (createdDraftIds.Count != 1)
+            throw new InvalidOperationException("mutation_outcome_unknown");
+        string observedId = createdDraftIds.Single();
+        string domId = TextField(saved, "entry_id");
+        if (domId.Length > 0 && domId != observedId)
+            throw new InvalidOperationException("mutation_outcome_unknown");
+        saved["entry_id"] = observedId;
         var reference = DraftReference(saved);
         await RequireAuthenticated();
         var result = new Dictionary<string, object> {
@@ -1104,11 +1516,16 @@ public sealed class OutlookSession : ApplicationContext
             subject.Contains("\r") || subject.Contains("\n") || subject.Contains("\0") ||
             body.Length < 1 || body.Length > 20000 || body.Contains("\0"))
             throw new InvalidOperationException("invalid_request");
+        createdDraftIds.Clear();
+        mutationStarted = true;
         var created = await ExecuteMailScript(new Dictionary<string, object> {
             { "phase", "new_mail" }
         });
         if (TextField(created, "state") != "composer_opening")
+        {
+            mutationStarted = false;
             throw new InvalidOperationException(TextField(created, "state"));
+        }
         await WaitForComposer(8);
         var filled = await ExecuteMailScript(new Dictionary<string, object> {
             { "phase", "fill_draft" }, { "recipient_email", recipient },
@@ -1125,6 +1542,10 @@ public sealed class OutlookSession : ApplicationContext
 
     async Task<Dictionary<string, object>> CreateReplyDraft(Dictionary<string, object> args)
     {
+        var sourceRef = RequireReference(Field(args, "source"));
+        if (String.IsNullOrWhiteSpace(TextField(sourceRef, "entry_id")))
+            throw new InvalidOperationException("invalid_request");
+        await RefreshMailbox();
         var source = await GetMessage(new Dictionary<string, object> {
             { "message", Field(args, "source") }
         });
@@ -1137,13 +1558,19 @@ public sealed class OutlookSession : ApplicationContext
         string body = TextField(args, "body_text");
         if (body.Length < 1 || body.Length > 20000 || body.Contains("\0"))
             throw new InvalidOperationException("invalid_request");
+        createdDraftIds.Clear();
         string messageId = TextField(Field(source, "ref") as Dictionary<string, object>, "entry_id");
         bool replyAll = BoolField(args, "reply_all");
+        mutationStarted = true;
         var opened = await ExecuteMailScript(new Dictionary<string, object> {
-            { "phase", "reply" }, { "message_id", messageId }, { "reply_all", replyAll }
+            { "phase", "reply" }, { "message_id", messageId }, { "reply_all", replyAll },
+            { "conversation_id", TextField(sourceRef, "conversation_id") }
         });
         if (TextField(opened, "state") != "composer_opening")
+        {
+            mutationStarted = false;
             throw new InvalidOperationException(TextField(opened, "state"));
+        }
         await WaitForComposer(8);
         var before = await WaitForComposer(2);
         var expectedRecipients = RecipientRows(Field(before, "recipients"));
@@ -1208,7 +1635,7 @@ public sealed class OutlookSession : ApplicationContext
         return summary;
     }
 
-    async Task<InboxScanResult> ScanInbox()
+    async Task<InboxScanResult> ScanInbox(string folder = "Inbox")
     {
         SetStage("inbox_scan");
         var rowsById = new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
@@ -1228,7 +1655,7 @@ public sealed class OutlookSession : ApplicationContext
                 steps++;
                 SetStage("inbox_scan_script");
                 var result = await ExecuteMailScript(new Dictionary<string, object> {
-                    { "phase", "scan" }, { "step", step }
+                    { "phase", "scan" }, { "step", step }, { "folder", folder }
                 });
                 string state = TextField(result, "state");
                 if (state == "navigating_inbox")
@@ -1300,7 +1727,7 @@ public sealed class OutlookSession : ApplicationContext
             {
                 SetStage("inbox_restore_scroll");
                 await ExecuteMailScript(new Dictionary<string, object> {
-                    { "phase", "scan" }, { "step", "restore" }
+                    { "phase", "scan" }, { "step", "restore" }, { "folder", folder }
                 });
             }
             catch { }
@@ -1369,7 +1796,7 @@ public sealed class OutlookSession : ApplicationContext
         };
     }
 
-    async Task OpenConversation(string conversation)
+    async Task OpenConversation(string conversation, string folder = "Inbox")
     {
         SetStage("message_open");
         for (int step = 0; step < 50; step++)
@@ -1382,7 +1809,7 @@ public sealed class OutlookSession : ApplicationContext
             if (state != "not_visible")
                 throw new InvalidOperationException(state);
             var scroll = await ExecuteMailScript(new Dictionary<string, object> {
-                { "phase", "scan" }, { "step", "next" }
+                { "phase", "scan" }, { "step", "next" }, { "folder", folder }
             });
             if (TextField(scroll, "state") != "listed" ||
                 !BoolField(scroll, "inbox_selected"))
@@ -1401,14 +1828,28 @@ public sealed class OutlookSession : ApplicationContext
         var reference = RequireReference(Field(args, "message"));
         string conversation = TextField(reference, "conversation_id");
         string requestedMessage = TextField(reference, "entry_id");
+        string folder = TextField(args, "folder");
+        if (String.IsNullOrEmpty(folder)) folder = "Inbox";
+        if (folder != "Inbox" && folder != "Archive" && folder != "Sent Items")
+            throw new InvalidOperationException("invalid_request");
         if (String.IsNullOrWhiteSpace(conversation))
             throw new InvalidOperationException("message_not_found");
         SetStage("message_inbox_scan");
-        var scan = await ScanInbox();
+        var visibleRows = await ExecuteMailScript(new Dictionary<string, object> {
+            { "phase", "scan" }, { "step", "start" }, { "folder", folder }
+        });
+        var loaded = Field(visibleRows, "rows") as System.Collections.IList;
+        bool visibleMatch = TextField(visibleRows, "state") == "listed" &&
+            BoolField(visibleRows, "inbox_selected") && loaded != null &&
+            loaded.Cast<object>().Count(row => row is Dictionary<string, object> &&
+                ConversationId((Dictionary<string, object>)row) == conversation) == 1;
+        var scan = visibleMatch ? new InboxScanResult {
+            Rows = loaded.Cast<Dictionary<string, object>>().ToList(), Truncated = true
+        } : await ScanInbox(folder);
         SetStage("message_conversation_match");
         if (scan.Rows.Count(row => ConversationId(row) == conversation) != 1)
             throw new InvalidOperationException("message_not_found");
-        await OpenConversation(conversation);
+        await OpenConversation(conversation, folder);
         SetStage("message_dom_read");
         DateTime deadline = DateTime.UtcNow.AddSeconds(12);
         Dictionary<string, object> result = null;
@@ -1435,7 +1876,8 @@ public sealed class OutlookSession : ApplicationContext
         List<Dictionary<string, object>> observed;
         if (!observedConversations.TryGetValue(conversation, out observed))
             throw new InvalidOperationException("message_identity_unavailable");
-        var exact = observed.Where(item => !BoolField(item, "is_draft")).ToList();
+        var exact = observed.Where(item => BoolField(item, "draft_known") &&
+            !BoolField(item, "is_draft")).ToList();
         if (exact.Count != 1)
             throw new InvalidOperationException(exact.Count == 0
                 ? "message_identity_unavailable" : "message_identity_ambiguous");
@@ -1458,6 +1900,8 @@ public sealed class OutlookSession : ApplicationContext
             Convert.ToString(recipient["recipient_type"]) + ":" +
             Convert.ToString(recipient["smtp_address"])).ToArray());
         var version = Field(detail, "version") as Dictionary<string, object>;
+        version["folder_entry_id"] = folder == "Inbox" ? "inbox" :
+            folder == "Archive" ? "archive" : "sent";
         version["version_digest"] = DigestValues(conversation, messageId,
             TextField(record, "change_key"),
             TextField(detail, "subject"), TextField(Field(detail, "sender") as Dictionary<string, object>,
@@ -1473,8 +1917,15 @@ public sealed class OutlookSession : ApplicationContext
             { "store_id", storeIdentity }
         };
         detail["recipients"] = recipients;
+        var sender = Field(record, "sender") as Dictionary<string, object>;
+        if (sender != null) detail["sender"] = sender;
         detail["body_text"] = body;
         detail["body_truncated"] = truncated;
+        var capability = await ExecuteMailScript(new Dictionary<string, object> {
+            { "phase", "reply_capability" }, { "conversation_id", conversation }
+        });
+        detail["can_create_reply_draft"] = BoolField(version, "content_complete") &&
+            BoolField(capability, "available");
         return detail;
     }
 
@@ -1493,17 +1944,285 @@ public sealed class OutlookSession : ApplicationContext
             TextField(current, "importance") == TextField(expected, "importance");
     }
 
+    async Task<Dictionary<string, object>> OpenDraft(Dictionary<string, object> reference)
+    {
+        string id = TextField(reference, "entry_id");
+        if (id.Length == 0) throw new InvalidOperationException("stale_draft");
+        var scan = await ScanInbox("Drafts");
+        Dictionary<string, object> record;
+        if (!observedMessages.TryGetValue(id, out record) || !BoolField(record, "is_draft"))
+            throw new InvalidOperationException("stale_draft");
+        string conversation = TextField(record, "conversation_id");
+        var matches = scan.Rows.Where(row => ConversationId(row) == conversation ||
+            ConversationId(row) == id).ToList();
+        if (matches.Count != 1) throw new InvalidOperationException("stale_draft");
+        await OpenConversation(ConversationId(matches[0]), "Drafts");
+        var composer = await WaitForComposer(10);
+        await RequireAuthenticated();
+        if (!observedMessages.TryGetValue(id, out record) ||
+            !BoolField(record, "is_draft") || BoolField(record, "has_attachments"))
+            throw new InvalidOperationException("stale_draft");
+        var sender = Field(record, "sender") as Dictionary<string, object>;
+        if (sender == null || TextField(sender, "smtp_address") != expectedAccount)
+            throw new InvalidOperationException("stale_draft");
+        string domId = TextField(composer, "entry_id");
+        if (domId.Length > 0 && domId != id) throw new InvalidOperationException("stale_draft");
+        return composer;
+    }
+
+    async Task<Dictionary<string, object>> SendDraft(Dictionary<string, object> args)
+    {
+        var reference = RequireReference(Field(args, "draft"));
+        string expectedDigest = TextField(args, "expected_digest");
+        if (!Regex.IsMatch(expectedDigest, "^[0-9a-f]{64}$"))
+            throw new InvalidOperationException("invalid_request");
+        await RefreshMailbox();
+        await ScanInbox("Sent Items");
+        var previous = new HashSet<string>(observedMessages.Keys, StringComparer.Ordinal);
+        var composer = await OpenDraft(reference);
+        var recipients = RecipientRows(Field(composer, "recipients"));
+        string subject = TextField(composer, "subject");
+        string body = TextField(composer, "body_text");
+        if (subject.Length == 0 || subject.Length > 250 || body.Length > 20000 ||
+            Convert.ToInt32(Field(composer, "attachment_count")) != 0 ||
+            recipients.Count == 0 || DraftDigest(subject, body, recipients) != expectedDigest)
+            throw new InvalidOperationException("stale_draft");
+        await RequireAuthenticated();
+        DateTimeOffset started = DateTimeOffset.UtcNow;
+        SetStage("send_click");
+        mutationStarted = true;
+        var clicked = await ExecuteMailScript(new Dictionary<string, object> {
+            { "phase", "send" }, { "subject", subject }, { "body_text", body },
+            { "recipients", Field(composer, "recipients") }
+        });
+        if (TextField(clicked, "state") != "send_clicked")
+            throw new InvalidOperationException("mutation_outcome_unknown");
+        SetStage("sent_items_verify");
+        await Task.Delay(1000);
+        // After the click every failure remains uncertain. Never click again.
+        await ScanInbox("Sent Items");
+        var candidates = observedMessages.Values.Where(record =>
+        {
+            DateTimeOffset sent;
+            var sender = Field(record, "sender") as Dictionary<string, object>;
+            return !previous.Contains(TextField(record, "entry_id")) &&
+                !BoolField(record, "is_draft") && TextField(record, "subject") == subject &&
+                sender != null && TextField(sender, "smtp_address") == expectedAccount &&
+                RecipientKey(RecipientRows(Field(record, "recipients"))) == RecipientKey(recipients) &&
+                DateTimeOffset.TryParse(TextField(record, "sent_at"), out sent) &&
+                sent >= started.AddSeconds(-5);
+        }).ToList();
+        if (candidates.Count != 1) throw new InvalidOperationException("mutation_outcome_unknown");
+        var candidate = candidates[0];
+        var sentRef = new Dictionary<string, object> {
+            { "entry_id", TextField(candidate, "entry_id") },
+            { "conversation_id", TextField(candidate, "conversation_id") },
+            { "store_id", storeIdentity }
+        };
+        var sentDetail = await GetMessage(new Dictionary<string, object> {
+            { "message", sentRef }, { "folder", "Sent Items" }
+        });
+        if (TextField(sentDetail, "body_text") != body || BoolField(sentDetail, "body_truncated"))
+            throw new InvalidOperationException("mutation_outcome_unknown");
+        await RequireAuthenticated();
+        return new Dictionary<string, object> {
+            { "state", "sent_verified" }, { "draft", reference },
+            { "account_verified", true }, { "sent_items_verified", true },
+            { "submitted_at", DateTimeOffset.UtcNow.ToString("o") },
+            { "subject", subject }, { "body_text", body }, { "body_truncated", false }
+        };
+    }
+
+    async Task<Dictionary<string, object>> Archive(Dictionary<string, object> args)
+    {
+        var reference = RequireReference(Field(args, "message"));
+        await RefreshMailbox();
+        var detail = await GetMessage(new Dictionary<string, object> { { "message", reference } });
+        var version = Field(detail, "version") as Dictionary<string, object>;
+        if (!VersionMatches(version, Field(args, "expected_source") as Dictionary<string, object>))
+            throw new InvalidOperationException("stale_message");
+        if (BoolField(detail, "flagged") || TextField(detail, "importance") == "high")
+            throw new InvalidOperationException("archive_protected");
+        var status = await RequireAuthenticated();
+        if (Convert.ToInt32(Field(status, "archive_folder_control_count")) != 1)
+            throw new InvalidOperationException("archive_unavailable");
+        movedItemIds.Clear();
+        SetStage("archive_click");
+        mutationStarted = true;
+        var clicked = await ExecuteMailScript(new Dictionary<string, object> {
+            { "phase", "archive" }, { "conversation_id", TextField(reference, "conversation_id") }
+        });
+        if (TextField(clicked, "state") != "archive_clicked")
+            throw new InvalidOperationException("mutation_outcome_unknown");
+        await Task.Delay(1000);
+        SetStage("archive_verify");
+        var archivedDetail = await GetMessage(new Dictionary<string, object> {
+            { "message", new Dictionary<string, object> {
+                { "conversation_id", TextField(reference, "conversation_id") },
+                { "store_id", storeIdentity }
+            } }, { "folder", "Archive" }
+        });
+        var archivedRef = Field(archivedDetail, "ref") as Dictionary<string, object>;
+        if (movedItemIds.Count != 1 ||
+            !movedItemIds.Contains(TextField(archivedRef, "entry_id")) ||
+            TextField(detail, "subject") != TextField(archivedDetail, "subject") ||
+            TextField(detail, "body_text") != TextField(archivedDetail, "body_text") ||
+            RecipientKey(RecipientRows(Field(detail, "recipients"))) !=
+                RecipientKey(RecipientRows(Field(archivedDetail, "recipients"))))
+            throw new InvalidOperationException("mutation_outcome_unknown");
+        return new Dictionary<string, object> {
+            { "original", reference }, { "archived", archivedRef },
+            { "archived_at", DateTimeOffset.UtcNow.ToString("o") }
+        };
+    }
+
+    static string SafeAttachmentName(string name, int index)
+    {
+        if (index < 1 || index > 500) throw new InvalidOperationException("invalid_request");
+        string clean = Regex.Replace(name ?? "", "[\\x00-\\x1f<>:\"/\\\\|?*]", "_").Trim(' ', '.');
+        if (clean.Length == 0) clean = "attachment";
+        if (clean.Length > 120)
+        {
+            string extension = Path.GetExtension(clean);
+            if (extension.Length > 20) extension = "";
+            clean = clean.Substring(0, 120 - extension.Length) + extension;
+        }
+        return index.ToString("D2") + "_" + clean;
+    }
+
+    static void RequirePlainDirectory(string path)
+    {
+        if (Directory.Exists(path) &&
+            (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("attachment_unavailable");
+        Directory.CreateDirectory(path);
+        var acl = new DirectorySecurity();
+        acl.SetAccessRuleProtection(true, false);
+        acl.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User,
+            FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+        acl.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+        new DirectoryInfo(path).SetAccessControl(acl);
+    }
+
+    async Task<Dictionary<string, object>> DownloadAttachments(Dictionary<string, object> args)
+    {
+        var reference = RequireReference(args);
+        var detail = await GetMessage(new Dictionary<string, object> { { "message", reference } });
+        Dictionary<string, object> record;
+        if (!observedMessages.TryGetValue(TextField(reference, "entry_id"), out record))
+            throw new InvalidOperationException("attachment_unavailable");
+        var attachments = Field(record, "attachments") as List<Dictionary<string, object>>;
+        if (attachments == null || BoolField(record, "has_attachments") && attachments.Count == 0)
+            throw new InvalidOperationException("attachment_unavailable");
+        bool pdfOnly = BoolField(args, "pdf_only");
+        var selected = attachments.Where(item => !pdfOnly ||
+            !BoolField(item, "inline") &&
+            TextField(item, "filename").EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)).ToList();
+        long total = selected.Sum(item => Convert.ToInt64(Field(item, "size_bytes")));
+        if (selected.Count > 25 || total > 52428800)
+            throw new InvalidOperationException("attachment_limit_exceeded");
+        string appRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OfficeActionServer");
+        string root = Path.Combine(appRoot, "outlook-web-attachments");
+        RequirePlainDirectory(appRoot);
+        RequirePlainDirectory(root);
+        string folder = Path.Combine(root, DigestValues(TextField(reference, "entry_id"), storeIdentity));
+        RequirePlainDirectory(folder);
+        var result = new List<Dictionary<string, object>>();
+        long savedTotal = 0;
+        foreach (var attachment in selected)
+        {
+            int index = Convert.ToInt32(Field(attachment, "index"));
+            string name = TextField(attachment, "filename");
+            string temp = Path.Combine(folder, Guid.NewGuid().ToString("N") + ".tmp");
+            pendingDownload = null;
+            pendingDownloadPath = temp;
+            allowDownload = true;
+            try
+            {
+                var downloadRequest = new Dictionary<string, object> {
+                    { "phase", "download_attachment" },
+                    { "conversation_id", TextField(reference, "conversation_id") },
+                    { "attachment_id", TextField(attachment, "attachment_id") }, { "filename", name }
+                };
+                var clicked = await ExecuteMailScript(downloadRequest);
+                if (TextField(clicked, "state") == "attachment_menu_opening")
+                {
+                    await Task.Delay(300);
+                    clicked = await ExecuteMailScript(downloadRequest);
+                }
+                if (TextField(clicked, "state") != "download_clicked")
+                    throw new InvalidOperationException("attachment_unavailable");
+                DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+                while (DateTime.UtcNow < deadline &&
+                    (pendingDownload == null || pendingDownload.State == CoreWebView2DownloadState.InProgress))
+                {
+                    if (pendingDownload != null && pendingDownload.BytesReceived + savedTotal > 52428800)
+                    {
+                        pendingDownload.Cancel();
+                        throw new InvalidOperationException("attachment_limit_exceeded");
+                    }
+                    await Task.Delay(100);
+                }
+                if (pendingDownload == null ||
+                    pendingDownload.State != CoreWebView2DownloadState.Completed || !File.Exists(temp))
+                    throw new InvalidOperationException("attachment_unavailable");
+                long size = new FileInfo(temp).Length;
+                if (size + savedTotal > 52428800 ||
+                    size != Convert.ToInt64(Field(attachment, "size_bytes")))
+                    throw new InvalidOperationException("attachment_limit_exceeded");
+                string hash;
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                using (var stream = File.OpenRead(temp))
+                    hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+                string destination = Path.Combine(folder, hash + "_" + SafeAttachmentName(name, index));
+                if (File.Exists(destination))
+                {
+                    if ((File.GetAttributes(destination) & FileAttributes.ReparsePoint) != 0)
+                        throw new InvalidOperationException("attachment_unavailable");
+                    using (var sha = System.Security.Cryptography.SHA256.Create())
+                    using (var stream = File.OpenRead(destination))
+                        if (BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant() != hash)
+                            throw new InvalidOperationException("attachment_unavailable");
+                }
+                else File.Move(temp, destination);
+                savedTotal += size;
+                result.Add(new Dictionary<string, object> {
+                    { "index", index }, { "filename", name }, { "size_bytes", size },
+                    { "local_path", destination }, { "sha256", hash }
+                });
+            }
+            finally
+            {
+                allowDownload = false;
+                if (pendingDownload != null && pendingDownload.State == CoreWebView2DownloadState.InProgress)
+                    pendingDownload.Cancel();
+                pendingDownload = null;
+                pendingDownloadPath = "";
+                if (File.Exists(temp)) File.Delete(temp);
+            }
+        }
+        return new Dictionary<string, object> { { "ref", Field(detail, "ref") }, { "items", result } };
+    }
+
     async Task<Dictionary<string, object>> Dispatch(Dictionary<string, object> request)
     {
         var allowedOperations = new HashSet<string>(StringComparer.Ordinal) {
             "outlook_status", "shutdown", "outlook_internal_identity_probe",
             "outlook_internal_response_probe",
-            "outlook_inbox_list", "outlook_search_inbox", "outlook_get_message"
+            "outlook_inbox_list", "outlook_search_inbox", "outlook_get_message",
+            "outlook_create_reply_draft", "outlook_create_mail_draft", "outlook_send_draft",
+            "outlook_archive", "outlook_download_attachments"
         };
         string requestedOperation = request.ContainsKey("operation")
             ? Convert.ToString(request["operation"]) : "";
         activeOperation = allowedOperations.Contains(requestedOperation)
             ? requestedOperation : "invalid_request";
+        mutationStarted = false;
         SetStage("dispatch");
         if (!request.ContainsKey("version") || Convert.ToInt32(request["version"]) != 1)
             throw new InvalidOperationException("invalid_request");
@@ -1558,6 +2277,10 @@ public sealed class OutlookSession : ApplicationContext
                 responseProbeUntil = DateTime.MinValue;
                 responseProbeConversation = "";
             }
+            else if (mode == "reload")
+            {
+                controller.CoreWebView2.Reload();
+            }
             else if (mode != "inspect") throw new InvalidOperationException("invalid_request");
             return ResponseProbeStatus();
         }
@@ -1567,6 +2290,16 @@ public sealed class OutlookSession : ApplicationContext
             return await InboxList(args, true);
         if (operation == "outlook_get_message")
             return await GetMessage(args);
+        if (operation == "outlook_create_reply_draft")
+            return await CreateReplyDraft(args);
+        if (operation == "outlook_create_mail_draft")
+            return await CreateMailDraft(args);
+        if (operation == "outlook_send_draft")
+            return await SendDraft(args);
+        if (operation == "outlook_archive")
+            return await Archive(args);
+        if (operation == "outlook_download_attachments")
+            return await DownloadAttachments(args);
         throw new InvalidOperationException("not_implemented");
     }
 
@@ -1581,8 +2314,9 @@ public sealed class OutlookSession : ApplicationContext
                 lastFailureOperation = activeOperation;
                 lastFailureStage = activeStage;
                 lastFailureType = exception.GetType().Name;
-                lastFailureCode = SafeErrorCode(exception.Message);
-                done.SetException(exception);
+                lastFailureCode = mutationStarted ? "mutation_outcome_unknown" :
+                    SafeErrorCode(exception.Message);
+                done.SetException(new InvalidOperationException(lastFailureCode));
             }
         }));
         return done.Task;

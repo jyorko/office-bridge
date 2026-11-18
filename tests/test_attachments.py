@@ -1,5 +1,6 @@
 """Synthetic attachment checks; never access Outlook or real mail."""
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -69,37 +70,32 @@ def test_download_model_rejects_invalid_metadata():
         AttachmentDownload(index=26, filename="a", size_bytes=-1, local_path="", sha256="bad")
 
 
-def test_powershell_filename_and_limit_boundaries(tmp_path):
-    source = Path(__file__).parents[1] / "src" / "office_bridge" / "native" / "attachments.ps1"
+@pytest.mark.skipif(os.name != "nt", reason="Windows native host required")
+def test_native_attachment_filenames_cannot_escape_cache(tmp_path):
+    source = Path(__file__).parents[1] / "src/office_bridge/native/outlook/OutlookSession.cs"
+    sdk = (
+        Path(os.environ["LOCALAPPDATA"])
+        / "OfficeActionServer/webview2-sdk/1.0.4314.35/Microsoft.Web.WebView2.Core.dll"
+    )
     harness = tmp_path / "synthetic.ps1"
     harness.write_text(
         r"""
-param([string]$SourceFile)
+param([string]$Source,[string]$Sdk)
 $ErrorActionPreference='Stop'
-$tokens=$null;$errors=$null
-$ast=[System.Management.Automation.Language.Parser]::ParseFile($SourceFile,[ref]$tokens,[ref]$errors)
-if($errors.Count){throw 'PowerShell syntax errors'}
-$ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false) |
- ForEach-Object {. ([scriptblock]::Create($_.Extent.Text))}
-function Must-Fail([scriptblock]$code,[string]$expected){
- $caught=$false
- try{& $code}catch{if($_.Exception.Message -cne $expected){throw};$caught=$true}
- if(-not $caught){throw 'Expected failure'}
-}
-foreach($name in @('../../evil.pdf','C:\\temp\\x:stream.pdf','CON','...','',"bad`nname.pdf",'a|b?c*')){
- $safe=Safe-Name $name 1
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -Path $Sdk
+Add-Type -Path $Source -ReferencedAssemblies @(
+ [System.Windows.Forms.Form].Assembly.Location,[System.Drawing.Size].Assembly.Location,$Sdk,'System.Web.Extensions'
+)
+$method=[OutlookSession].GetMethod('SafeAttachmentName',[Reflection.BindingFlags]'Static,NonPublic')
+foreach($name in @('../../evil.pdf','C:\temp\x:stream.pdf','CON','...','',"bad`nname.pdf",'a|b?c*')){
+ $safe=[string]$method.Invoke($null,@($name,1))
  if($safe -notmatch '^01_' -or $safe -match '[\x00-\x1f<>:"/\\|?*]' -or $safe.EndsWith('.')){throw 'Unsafe filename'}
  if([IO.Path]::GetFileName($safe) -cne $safe){throw 'Path traversal'}
 }
-$long=Safe-Name (('x'*300)+'.pdf') 25
+$long=[string]$method.Invoke($null,@((('x'*300)+'.pdf'),25))
 if($long.Length -gt 123 -or -not $long.EndsWith('.pdf')){throw 'Filename bound'}
-if((Safe-Name 'same.pdf' 1) -ceq (Safe-Name 'same.pdf' 2)){throw 'Duplicate filename collision'}
-Check-Limits 25 52428800
-Check-Limits 0 0
-Must-Fail {Check-Limits 26 0} 'attachment_limit_exceeded'
-Must-Fail {Check-Limits 1 52428801} 'attachment_limit_exceeded'
-Must-Fail {Check-Limits 1 -1} 'attachment_limit_exceeded'
-Must-Fail {Safe-Name 'x' 0} 'invalid_input'
+if($method.Invoke($null,@('same.pdf',1)) -ceq $method.Invoke($null,@('same.pdf',2))){throw 'Filename collision'}
 """,
         encoding="utf-8",
     )
@@ -110,12 +106,14 @@ Must-Fail {Safe-Name 'x' 0} 'invalid_input'
             "-NonInteractive",
             "-File",
             str(harness),
-            "-SourceFile",
+            "-Source",
             str(source),
+            "-Sdk",
+            str(sdk),
         ],
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=60,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr

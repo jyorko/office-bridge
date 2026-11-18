@@ -74,6 +74,11 @@ def test_read_session_timeout_is_reported_once(fake_outlook_session, operation):
         "inbox_list",
         "get_message",
         "search_inbox",
+        "create_reply_draft",
+        "create_mail_draft",
+        "send_draft",
+        "archive",
+        "download_attachments",
     ],
 )
 def test_outlook_does_not_start_classic_powershell(operation, monkeypatch):
@@ -81,6 +86,7 @@ def test_outlook_does_not_start_classic_powershell(operation, monkeypatch):
         raise AssertionError("Outlook must use the persistent WebView2 host.")
 
     monkeypatch.setattr(bridge.os, "name", "nt")
+    monkeypatch.setattr(bridge, "OUTLOOK_SUPPORTED", frozenset(bridge.OUTLOOK_OPERATIONS))
     monkeypatch.setattr(bridge.subprocess, "Popen", forbidden)
     monkeypatch.setattr(
         session,
@@ -92,15 +98,21 @@ def test_outlook_does_not_start_classic_powershell(operation, monkeypatch):
 
 @pytest.mark.parametrize(
     "operation",
-    ["create_reply_draft", "create_mail_draft", "send_draft", "archive", "download_attachments"],
+    ["create_reply_draft", "create_mail_draft", "send_draft", "archive"],
 )
-def test_outlook_mutations_stay_unavailable_until_web_handlers_exist(operation, monkeypatch):
+def test_outlook_mutations_report_unknown_outcomes_without_replaying(operation, monkeypatch):
     calls = []
     monkeypatch.setattr(bridge.os, "name", "nt")
-    monkeypatch.setattr(session, "invoke", lambda *args, **kwargs: calls.append(args))
-    with pytest.raises(bridge.BridgeError, match="outlook_operation_unavailable"):
+    monkeypatch.setattr(bridge, "OUTLOOK_SUPPORTED", frozenset(bridge.OUTLOOK_OPERATIONS))
+
+    def timeout(*args, **kwargs):
+        calls.append(args)
+        raise session.SessionError("session_timeout")
+
+    monkeypatch.setattr(session, "invoke", timeout)
+    with pytest.raises(bridge.BridgeError, match="mutation_outcome_unknown"):
         bridge.invoke(operation, {})
-    assert calls == []
+    assert len(calls) == 1
 
 
 def test_models_reject_executable_fields_and_bad_identity():

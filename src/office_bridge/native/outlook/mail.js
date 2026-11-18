@@ -7,7 +7,7 @@
     (element && (element.innerText || element.textContent) || "")
       .replace(/\u00a0/g, " ")
       .split(/\r?\n/)
-      .map((part) => part.trim())
+      .map((part) => part.replace(/[\uE000-\uF8FF]/g, "").trim())
       .filter(Boolean);
   const rowId = (row) =>
     row.getAttribute("data-itemid") ||
@@ -47,8 +47,10 @@
     Array.from(element.querySelectorAll("*")).some((child) =>
       /(^|\s)(selected|is-selected)(\s|$)/i.test(String(child.className || "")),
     );
+  const folderName = ["Inbox", "Drafts", "Sent Items", "Archive"].includes(request.folder)
+    ? request.folder : "Inbox";
   const folderState = () => {
-    const inbox = folderItems("Inbox");
+    const inbox = folderItems(folderName);
     return {
       inbox_count: inbox.length,
       inbox_selected: inbox.length === 1 && selectedFolder(inbox[0]),
@@ -211,21 +213,8 @@
     );
   };
   const label = (element) =>
-    [
-      "aria-label",
-      "title",
-      "data-testid",
-      "data-automationid",
-      "data-tid",
-      "innerText",
-    ]
-      .map((name) =>
-        name === "innerText"
-          ? element.innerText || ""
-          : element.getAttribute(name) || "",
-      )
-      .join(" ")
-      .trim();
+    (element.getAttribute("aria-label") || element.getAttribute("title") ||
+      element.innerText || "").trim();
   const visibleControls = (root) =>
     Array.from(root.querySelectorAll('button,[role="button"],a[tabindex]')).filter(
       visible,
@@ -245,29 +234,58 @@
     ).filter(visible);
     const recipientFields = Array.from(
       root.querySelectorAll(
-        'input[aria-label*=to i],input[placeholder*=to i],' +
-          '[role="textbox"][aria-label*=to i]',
+        'input[aria-label^="To" i],input[placeholder="To" i],' +
+          '[role="textbox"][aria-label^="To" i]',
       ),
     ).filter(visible);
     const sendButtons = visibleControls(root).filter((element) =>
-      /^send(?:\s+now)?$/i.test(label(element)),
+      /^send(?:\s+now)?(?:\s*\(.*\))?$/i.test(label(element)),
     );
     return { editors, bodyEditors, subjectFields, recipientFields, sendButtons };
   };
-  const composerRoots = () =>
-    Array.from(
+  const composerRoots = () => {
+    const candidates = Array.from(
       document.querySelectorAll(
         '[role="dialog"],[data-testid*="compose" i],[data-automationid*="compose" i]',
       ),
-    )
-      .filter(visible)
+    );
+    for (const body of Array.from(document.querySelectorAll('[contenteditable="true"]'))
+      .filter(visible).filter(element => /message body|message content|reply body/i.test(label(element)))) {
+      let ancestor = body.parentElement;
+      while (ancestor && ancestor !== document.body) {
+        const parts = composerParts(ancestor);
+        if (parts.bodyEditors.length === 1 && parts.sendButtons.length === 1) {
+          candidates.push(ancestor);
+          break;
+        }
+        ancestor = ancestor.parentElement;
+      }
+    }
+    const roots = Array.from(new Set(candidates)).filter(visible)
       .filter((root) => {
         const parts = composerParts(root);
         return parts.bodyEditors.length > 0 && parts.sendButtons.length > 0;
       });
+    return roots.filter(root => !roots.some(other => other !== root && root.contains(other)));
+  };
   const selectedComposer = () => {
     const roots = composerRoots();
     return roots.length === 1 ? roots[0] : null;
+  };
+  const selectedMessageCard = () => {
+    const row = getUniqueRow(request.conversation_id);
+    const bodies = Array.from(document.querySelectorAll('[role="document"]')).filter(visible);
+    if (!row || row.getAttribute("aria-selected") !== "true" || bodies.length !== 1)
+      return null;
+    let card = bodies[0].closest('article,[role="article"]') || bodies[0].parentElement;
+    const bodyCount = (scope) => bodies.filter(body => scope === body || scope.contains(body)).length;
+    while (card && card !== document.body &&
+      bodyCount(card) === 1 &&
+      !visibleControls(card).some(element => /^(reply|reply all)$/i.test(label(element))))
+      card = card.parentElement;
+    return card && card !== document.body &&
+      bodyCount(card) === 1
+      ? card : null;
   };
   const recipientAddresses = (root) => {
     const emailPattern = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
@@ -296,14 +314,19 @@
     const entries = new Map();
     const elements = Array.from(
       root.querySelectorAll(
-        "[data-email],[data-smtp-address],a[href^='mailto:'],[data-recipient-type]",
+        "[data-email],[data-smtp-address],a[href^='mailto:'],[data-recipient-type]," +
+          '[role="button"][aria-label*="@"],[title*="@"]',
       ),
     ).filter(visible);
     for (const element of elements) {
-      const address =
+      const rawAddress =
         element.getAttribute("data-email") ||
         element.getAttribute("data-smtp-address") ||
-        (element.getAttribute("href") || "").replace(/^mailto:/i, "").split("?")[0];
+        (element.getAttribute("href") || "").replace(/^mailto:/i, "").split("?")[0] ||
+        element.getAttribute("title") || element.getAttribute("aria-label") || "";
+      const addresses = rawAddress.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+      if (addresses.length !== 1) continue;
+      const address = addresses[0];
       if (!emailPattern.test(address)) continue;
       const markers = [
         element.getAttribute("aria-label") || "",
@@ -374,7 +397,7 @@
     const body = parts.bodyEditors[0];
     const subject = parts.subjectFields[0] || null;
     const identity = draftIdentity(root);
-    const saved = Array.from(root.querySelectorAll("[aria-label],[title],[data-testid]"))
+    const saved = Array.from(root.querySelectorAll("[aria-label],[title],[data-testid],[role=status]"))
       .filter(visible)
       .some((element) => /\bsaved\b/i.test(label(element)) &&
         !/\bsaving\b/i.test(label(element)));
@@ -617,7 +640,7 @@
     if (folder.inbox_count !== 1) return { state: "inbox_ambiguous", rows: [] };
     if (!folder.inbox_selected) {
       if (hasComposer()) return { state: "draft_exists", rows: [] };
-      folderItems("Inbox")[0].click();
+      folderItems(folderName)[0].click();
       return { state: "navigating_inbox", rows: [] };
     }
     const container = scrollContainer();
@@ -726,10 +749,13 @@
   if (request.phase === "reply") {
     if (hasComposer()) return { state: "draft_exists" };
     const matches = exactMessageNodes(request.message_id);
-    if (matches.length !== 1) return { state: "message_identity_ambiguous" };
-    const card =
-      matches[0].closest('article,[role="article"],[role="document"]') ||
-      matches[0].parentElement;
+    let card = matches.length === 1
+      ? matches[0].closest('article,[role="article"],[role="document"]') ||
+        matches[0].parentElement : null;
+    if (!card && matches.length === 0 && request.conversation_id) {
+      card = selectedMessageCard();
+    }
+    if (matches.length > 1) return { state: "message_identity_ambiguous" };
     if (!card) return { state: "message_not_found" };
     const expected = request.reply_all
       ? /^reply\s+all$/i
@@ -752,6 +778,16 @@
       return { state: controls.length ? "compose_control_ambiguous" : "compose_unavailable" };
     controls[0].click();
     return { state: "composer_opening" };
+  }
+
+  if (request.phase === "reply_capability") {
+    const card = hasComposer() ? null : selectedMessageCard();
+    return {
+      state: "reply_capability",
+      available: !!card &&
+        visibleControls(card).filter(element => /^reply$/i.test(label(element))).length === 1 &&
+        visibleControls(card).filter(element => /^reply all$/i.test(label(element))).length === 1,
+    };
   }
 
   if (request.phase === "composer_state") {
@@ -812,8 +848,8 @@
     if (snapshot.state !== "composer_ready" || !snapshot.saved)
       return { state: "draft_not_saved" };
     if (
-      snapshot.draft_identity_candidate_count !== 1 ||
-      !snapshot.entry_id
+      !request.host_identity_verified &&
+      (snapshot.draft_identity_candidate_count !== 1 || !snapshot.entry_id)
     )
       return { state: "draft_identity_unavailable" };
     const closeButtons = visibleControls(root).filter((element) =>
@@ -821,7 +857,112 @@
     );
     if (closeButtons.length > 1) return { state: "composer_ambiguous" };
     if (closeButtons.length === 1) closeButtons[0].click();
+    else {
+      const drafts = folderItems("Drafts");
+      if (drafts.length !== 1) return { state: "draft_not_saved" };
+      drafts[0].click();
+    }
     return { state: "draft_saved", draft: snapshot };
+  }
+
+  if (request.phase === "send") {
+    const root = selectedComposer();
+    if (!root) return { state: "composer_unavailable" };
+    const snapshot = composeSnapshot(root);
+    if (snapshot.state !== "composer_ready" ||
+      snapshot.body_text !== request.body_text || snapshot.subject !== request.subject ||
+      snapshot.attachment_count !== 0 ||
+      JSON.stringify(snapshot.recipients) !== JSON.stringify(request.recipients))
+      return { state: "stale_draft" };
+    const buttons = composerParts(root).sendButtons;
+    if (buttons.length !== 1) return { state: "composer_ambiguous" };
+    buttons[0].click();
+    return { state: "send_clicked" };
+  }
+
+  if (request.phase === "archive") {
+    if (hasComposer()) return { state: "draft_exists" };
+    const row = getUniqueRow(request.conversation_id);
+    if (!row || row.getAttribute("aria-selected") !== "true")
+      return { state: "message_not_found" };
+    const buttons = visibleControls(document).filter(element => /^archive$/i.test(label(element)));
+    if (buttons.length !== 1) return { state: "archive_unavailable" };
+    buttons[0].click();
+    return { state: "archive_clicked" };
+  }
+
+  if (request.phase === "attachment_list" || request.phase === "download_attachment") {
+    if (hasComposer()) return { state: "draft_exists" };
+    const row = getUniqueRow(request.conversation_id);
+    if (!row || row.getAttribute("aria-selected") !== "true")
+      return { state: "message_not_found" };
+    const bodies = Array.from(document.querySelectorAll('[role="document"]')).filter(visible);
+    if (bodies.length !== 1) return { state: "message_identity_ambiguous" };
+    if (request.phase === "download_attachment" && request.filename) {
+      const pending = window.__officeAttachmentDownload;
+      if (pending && pending.id === request.attachment_id &&
+        pending.conversation === request.conversation_id) {
+        const menus = Array.from(document.querySelectorAll('[role="menuitem"]'))
+          .filter(visible).filter(element => /^download$/i.test(label(element)));
+        if (menus.length !== 1) return { state: "attachment_unavailable" };
+        delete window.__officeAttachmentDownload;
+        menus[0].click();
+        return { state: "download_clicked" };
+      }
+      const markers = Array.from(document.querySelectorAll(
+        '[data-testid*="attachment" i],[data-automationid*="attachment" i],' +
+          '[role="button"][aria-label],[title]',
+      )).filter(visible).filter(element =>
+        label(element) === request.filename || label(element).includes(request.filename));
+      const tiles = [];
+      for (const marker of markers) {
+        let tile = marker;
+        while (tile && tile !== document.body &&
+          !visibleControls(tile).some(element =>
+            /^download(?:\s|$)|^(more actions|more options|attachment options)$/i.test(label(element))))
+          tile = tile.parentElement;
+        if (tile && tile !== document.body &&
+          Array.from(tile.querySelectorAll('[role="document"]')).filter(visible).length <= 1)
+          tiles.push(tile);
+      }
+      const unique = Array.from(new Set(tiles));
+      if (unique.length !== 1) return { state: "attachment_unavailable" };
+      const downloads = visibleControls(unique[0]).filter(element =>
+        /^download(?:\s|$)/i.test(label(element)));
+      if (downloads.length === 1) {
+        downloads[0].click();
+        return { state: "download_clicked" };
+      }
+      const options = visibleControls(unique[0]).filter(element =>
+        /^(more actions|more options|attachment options)$/i.test(label(element)));
+      if (options.length !== 1) return { state: "attachment_unavailable" };
+      window.__officeAttachmentDownload = {
+        id: request.attachment_id, conversation: request.conversation_id,
+      };
+      options[0].click();
+      return { state: "attachment_menu_opening" };
+    }
+    let scope = bodies[0].parentElement;
+    while (scope && scope !== document.body &&
+      !scope.querySelector('[data-attachmentid],[data-attachment-id]')) scope = scope.parentElement;
+    if (!scope || scope === document.body)
+      return { state: "attachment_list", items: [] };
+    const elements = Array.from(scope.querySelectorAll('[data-attachmentid],[data-attachment-id]'));
+    const items = elements.filter(visible).map((element, index) => ({
+      index: index + 1,
+      attachment_id: element.getAttribute("data-attachmentid") ||
+        element.getAttribute("data-attachment-id"),
+      filename: element.getAttribute("data-filename") || label(element),
+    }));
+    if (request.phase === "attachment_list") return { state: "attachment_list", items };
+    const matches = elements.filter(element =>
+      (element.getAttribute("data-attachmentid") || element.getAttribute("data-attachment-id")) ===
+      request.attachment_id);
+    if (matches.length !== 1) return { state: "attachment_unavailable" };
+    const buttons = visibleControls(matches[0]).filter(element => /^download$/i.test(label(element)));
+    if (buttons.length !== 1) return { state: "attachment_unavailable" };
+    buttons[0].click();
+    return { state: "download_clicked" };
   }
 
   if (request.phase === "identity_probe")

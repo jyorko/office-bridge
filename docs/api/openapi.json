@@ -623,7 +623,7 @@
     "/api/actions/desktop-office/outlook-get-message/run": {
       "post": {
         "summary": "Outlook Get Message",
-        "description": "Read one exact message with its body capped at 20000 characters.\nThis operation fails closed when Outlook does not expose an exact message\nidentity. Draft, reply, attachment, send, and archive actions are unavailable.",
+        "description": "Read one exact message with its body capped at 20000 characters.\nReads require one verified non-draft item in the selected conversation.\nReply controls require a complete source version and an available composer route.",
         "operationId": "outlook_get_message",
         "requestBody": {
           "content": {
@@ -899,6 +899,11 @@
                             "body_truncated": {
                               "type": "boolean",
                               "title": "Body Truncated"
+                            },
+                            "can_create_reply_draft": {
+                              "type": "boolean",
+                              "title": "Can Create Reply Draft",
+                              "default": false
                             }
                           },
                           "additionalProperties": false,

@@ -52,6 +52,7 @@ class MessageDetail(MessageSummary):
     recipients: list[MailAddress]
     body_text: str
     body_truncated: bool
+    can_create_reply_draft: bool = False
 
 
 class InboxQuery(Model):

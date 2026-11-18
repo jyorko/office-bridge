@@ -20,6 +20,11 @@ from office_bridge.outlook import session
             "outlook_search_inbox",
             {"query": {"subject_contains": "invoice"}, "limit": 10},
         ),
+        ("create_reply_draft", "outlook_create_reply_draft", {"body_text": "reply"}),
+        ("create_mail_draft", "outlook_create_mail_draft", {"subject": "draft"}),
+        ("send_draft", "outlook_send_draft", {"expected_digest": "a" * 64}),
+        ("archive", "outlook_archive", {"expected_source": {}}),
+        ("download_attachments", "outlook_download_attachments", {"pdf_only": True}),
     ],
 )
 def test_outlook_operations_use_persistent_webview_session(
@@ -32,6 +37,7 @@ def test_outlook_operations_use_persistent_webview_session(
         return {"accepted": True}
 
     monkeypatch.setattr(desktop.os, "name", "nt")
+    monkeypatch.setattr(desktop, "OUTLOOK_SUPPORTED", frozenset(desktop.OUTLOOK_OPERATIONS))
     monkeypatch.setattr(session, "invoke", invoke)
     assert desktop.invoke(operation, arguments) == {"accepted": True}
     assert len(calls) == 1
@@ -46,10 +52,9 @@ def test_outlook_operations_use_persistent_webview_session(
         "create_mail_draft",
         "send_draft",
         "archive",
-        "download_attachments",
     ],
 )
-def test_unimplemented_outlook_mutations_are_not_routed(monkeypatch, operation):
+def test_uncertain_outlook_mutations_are_never_retried(monkeypatch, operation):
     calls = []
 
     def invoke(*args, **kwargs):
@@ -57,10 +62,26 @@ def test_unimplemented_outlook_mutations_are_not_routed(monkeypatch, operation):
         raise session.SessionError("session_timeout")
 
     monkeypatch.setattr(desktop.os, "name", "nt")
+    monkeypatch.setattr(desktop, "OUTLOOK_SUPPORTED", frozenset(desktop.OUTLOOK_OPERATIONS))
     monkeypatch.setattr(session, "invoke", invoke)
+    with pytest.raises(desktop.BridgeError, match="mutation_outcome_unknown"):
+        desktop.invoke(operation, {})
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["create_reply_draft", "create_mail_draft", "send_draft", "archive", "download_attachments"],
+)
+def test_unaccepted_mailbox_writes_stay_disabled(monkeypatch, operation):
+    monkeypatch.setattr(desktop.os, "name", "nt")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Unaccepted mailbox writes must not reach the host")
+
+    monkeypatch.setattr(session, "invoke", forbidden)
     with pytest.raises(desktop.BridgeError, match="outlook_operation_unavailable"):
         desktop.invoke(operation, {})
-    assert calls == []
 
 
 def test_launcher_keeps_outlook_window_hidden_by_default():
