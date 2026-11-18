@@ -233,6 +233,137 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -515,6 +646,137 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -806,6 +1068,137 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -1180,13 +1573,43 @@
                             },
                             "status": {
                               "type": "string",
-                              "const": "submitted",
-                              "title": "Status"
+                              "title": "Status",
+                              "enum": [
+                                "submitted",
+                                "already_submitted"
+                              ]
                             },
                             "submitted_at": {
                               "type": "string",
                               "format": "date-time",
                               "title": "Submitted At"
+                            },
+                            "subject": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Subject"
+                            },
+                            "body_text": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Body Text"
+                            },
+                            "body_truncated": {
+                              "type": "boolean",
+                              "title": "Body Truncated",
+                              "default": false
                             }
                           },
                           "additionalProperties": false,
@@ -1215,6 +1638,137 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -1923,6 +2477,137 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -2341,6 +3026,17 @@
                               },
                               "type": "array",
                               "title": "Capabilities"
+                            },
+                            "audio_muted": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Audio Muted"
                             }
                           },
                           "additionalProperties": false,
@@ -5575,6 +6271,137 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -5594,8 +6421,7 @@
             }
           }
         },
-        "x-openai-isConsequential": false,
-        "x-operation-kind": "action"
+        "x-operation-kind": "tool"
       }
     },
     "/api/actions/desktop-office/teams-web-send-chat/run": {
@@ -5824,6 +6650,137 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -5843,8 +6800,7 @@
             }
           }
         },
-        "x-openai-isConsequential": true,
-        "x-operation-kind": "action"
+        "x-operation-kind": "tool"
       }
     },
     "/api/managed-work-items/v1/schema": {
@@ -9343,6 +10299,495 @@
         },
         "x-openai-isConsequential": false,
         "x-operation-kind": "action"
+      }
+    },
+    "/api/actions/desktop-office/office-message-app/run": {
+      "post": {
+        "summary": "Office Message App",
+        "description": "Serve the Office message presentation app.",
+        "operationId": "office_message_app",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "title": "Response for Office Message App",
+                  "description": ""
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-kind": "resource"
+      }
+    },
+    "/api/actions/desktop-office/office-present-messages/run": {
+      "post": {
+        "summary": "Office Present Messages",
+        "description": "Render existing Outlook messages, send receipts, or Teams messages in a local reading view.",
+        "operationId": "office_present_messages",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "view": {
+                    "properties": {
+                      "cards": {
+                        "items": {
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "mail",
+                                    "chat",
+                                    "receipt"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Kind"
+                            },
+                            "heading": {
+                              "type": "string",
+                              "title": "Heading"
+                            },
+                            "detail": {
+                              "type": "string",
+                              "title": "Detail",
+                              "default": ""
+                            },
+                            "body": {
+                              "type": "string",
+                              "title": "Body",
+                              "default": ""
+                            },
+                            "unread": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Unread"
+                            },
+                            "timestamp": {
+                              "type": "string",
+                              "title": "Timestamp",
+                              "default": ""
+                            },
+                            "facts": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object",
+                              "title": "Facts"
+                            },
+                            "body_truncated": {
+                              "type": "boolean",
+                              "title": "Body Truncated",
+                              "default": false
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "heading"
+                          ],
+                          "title": "Card"
+                        },
+                        "type": "array",
+                        "maxItems": 50,
+                        "title": "Cards"
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "Outlook",
+                          "Teams",
+                          "Office"
+                        ],
+                        "title": "Source",
+                        "default": "Office"
+                      },
+                      "title": {
+                        "type": "string",
+                        "title": "Title",
+                        "default": "Messages"
+                      },
+                      "detail": {
+                        "type": "string",
+                        "title": "Detail",
+                        "default": ""
+                      },
+                      "empty": {
+                        "type": "string",
+                        "title": "Empty",
+                        "default": "No messages found"
+                      }
+                    },
+                    "type": "object",
+                    "required": [
+                      "cards"
+                    ],
+                    "title": "View",
+                    "description": "Display fields copied from existing results. Use the actual receipt status\nfor a send and include message text only when available."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "view"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "view": {
+                      "properties": {
+                        "cards": {
+                          "items": {
+                            "properties": {
+                              "kind": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "mail",
+                                      "chat",
+                                      "receipt"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Kind"
+                              },
+                              "heading": {
+                                "type": "string",
+                                "title": "Heading"
+                              },
+                              "detail": {
+                                "type": "string",
+                                "title": "Detail",
+                                "default": ""
+                              },
+                              "body": {
+                                "type": "string",
+                                "title": "Body",
+                                "default": ""
+                              },
+                              "unread": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Unread"
+                              },
+                              "timestamp": {
+                                "type": "string",
+                                "title": "Timestamp",
+                                "default": ""
+                              },
+                              "facts": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object",
+                                "title": "Facts"
+                              },
+                              "body_truncated": {
+                                "type": "boolean",
+                                "title": "Body Truncated",
+                                "default": false
+                              }
+                            },
+                            "type": "object",
+                            "required": [
+                              "heading"
+                            ],
+                            "title": "Card"
+                          },
+                          "type": "array",
+                          "maxItems": 50,
+                          "title": "Cards"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "Outlook",
+                            "Teams",
+                            "Office"
+                          ],
+                          "title": "Source",
+                          "default": "Office"
+                        },
+                        "title": {
+                          "type": "string",
+                          "title": "Title",
+                          "default": "Messages"
+                        },
+                        "detail": {
+                          "type": "string",
+                          "title": "Detail",
+                          "default": ""
+                        },
+                        "empty": {
+                          "type": "string",
+                          "title": "Empty",
+                          "default": "No messages found"
+                        }
+                      },
+                      "type": "object",
+                      "required": [
+                        "cards"
+                      ],
+                      "title": "View"
+                    },
+                    "html": {
+                      "type": "string",
+                      "title": "Html"
+                    },
+                    "view_id": {
+                      "type": "string",
+                      "title": "View Id"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "view",
+                    "html"
+                  ],
+                  "title": "Response for Office Present Messages"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-kind": "tool"
+      }
+    },
+    "/api/actions/desktop-office/office-open-message-view/run": {
+      "post": {
+        "summary": "Office Open Message View",
+        "description": "Open an existing message view in an isolated browser for standalone clients or an explicit open-window request.",
+        "operationId": "office_open_message_view",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "view_id": {
+                    "type": "string",
+                    "title": "View Id",
+                    "description": "Opaque identity returned in the existing presentation. Reuse it for display retries."
+                  },
+                  "view": {
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "Outlook",
+                          "Teams",
+                          "Office"
+                        ],
+                        "title": "Source",
+                        "default": "Office"
+                      },
+                      "title": {
+                        "type": "string",
+                        "title": "Title",
+                        "default": "Messages"
+                      },
+                      "detail": {
+                        "type": "string",
+                        "title": "Detail",
+                        "default": ""
+                      },
+                      "empty": {
+                        "type": "string",
+                        "title": "Empty",
+                        "default": "No messages found"
+                      },
+                      "cards": {
+                        "items": {
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "mail",
+                                    "chat",
+                                    "receipt"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Kind"
+                            },
+                            "heading": {
+                              "type": "string",
+                              "title": "Heading"
+                            },
+                            "detail": {
+                              "type": "string",
+                              "title": "Detail",
+                              "default": ""
+                            },
+                            "body": {
+                              "type": "string",
+                              "title": "Body",
+                              "default": ""
+                            },
+                            "unread": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Unread"
+                            },
+                            "timestamp": {
+                              "type": "string",
+                              "title": "Timestamp",
+                              "default": ""
+                            },
+                            "facts": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object",
+                              "title": "Facts"
+                            },
+                            "body_truncated": {
+                              "type": "boolean",
+                              "title": "Body Truncated",
+                              "default": false
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "heading"
+                          ],
+                          "title": "Card"
+                        },
+                        "type": "array",
+                        "maxItems": 50,
+                        "title": "Cards"
+                      }
+                    },
+                    "type": "object",
+                    "required": [
+                      "cards"
+                    ],
+                    "title": "View",
+                    "description": "The same structured view returned by the Office action. No Office operation is repeated."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "view_id",
+                  "view"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "view_id": {
+                      "type": "string",
+                      "title": "View Id"
+                    },
+                    "opened": {
+                      "type": "boolean",
+                      "title": "Opened"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "view_id",
+                    "opened"
+                  ],
+                  "title": "Response for Office Open Message View"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-kind": "tool"
       }
     }
   },

@@ -20,38 +20,52 @@ from office_bridge.outlook.models import (
     ReplyDraft,
     SendReceipt,
 )
+from office_bridge.presentation import MESSAGE_UI, MessageResponse, with_presentation
 
 
-@tool(read_only_hint=True, open_world_hint=False)
-def outlook_inbox_list(limit: Limit = 20, unread_only: bool = False) -> Response[InboxPage]:
+@tool(read_only_hint=True, open_world_hint=False, meta=MESSAGE_UI)
+def outlook_inbox_list(limit: Limit = 20, unread_only: bool = False) -> MessageResponse[InboxPage]:
     """List the newest inbox mail within a bounded scan of 500 items.
 
     Args:
         limit: Maximum results, from 1 to 50.
         unread_only: Return only unread mail when true.
     """
-    return desktop.run("inbox_list", InboxPage, limit=limit, unread_only=unread_only)
+    return with_presentation(
+        desktop.run("inbox_list", InboxPage, limit=limit, unread_only=unread_only),
+        title="Unread inbox" if unread_only else "Inbox",
+    )
 
 
-@tool(read_only_hint=True, open_world_hint=False)
-def outlook_get_message(message: MessageRef) -> Response[MessageDetail]:
+@tool(read_only_hint=True, open_world_hint=False, meta=MESSAGE_UI)
+def outlook_get_message(message: MessageRef) -> MessageResponse[MessageDetail]:
     """Read mail with body capped at 20000 characters.
 
     Args:
         message: Entry and store identity returned by a mail listing.
     """
-    return desktop.run("get_message", MessageDetail, message=message)
+    return with_presentation(desktop.run("get_message", MessageDetail, message=message))
 
 
-@tool(read_only_hint=True, open_world_hint=False)
-def outlook_search_inbox(query: InboxQuery, limit: Limit = 20) -> Response[InboxPage]:
+@tool(read_only_hint=True, open_world_hint=False, meta=MESSAGE_UI)
+def outlook_search_inbox(query: InboxQuery, limit: Limit = 20) -> MessageResponse[InboxPage]:
     """Search literal substrings within the newest 500 inbox items.
 
     Args:
         query: Literal subject, sender, date, and unread filters.
         limit: Maximum results, from 1 to 50.
     """
-    return desktop.run("search_inbox", InboxPage, query=query, limit=limit)
+    filters = [
+        f"Subject contains “{query.subject_contains}”" if query.subject_contains else "",
+        f"Sender contains “{query.sender_contains}”" if query.sender_contains else "",
+        f"After {query.received_after.isoformat()}" if query.received_after else "",
+        "Unread only" if query.unread_only else "",
+    ]
+    return with_presentation(
+        desktop.run("search_inbox", InboxPage, query=query, limit=limit),
+        title="Inbox search",
+        scope=" · ".join(filter(None, filters)),
+    )
 
 
 @tool(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
@@ -79,17 +93,25 @@ def outlook_create_reply_draft(
     )
 
 
-@tool(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False)
+@tool(
+    read_only_hint=False,
+    destructive_hint=True,
+    idempotent_hint=False,
+    open_world_hint=False,
+    meta=MESSAGE_UI,
+)
 def outlook_send_draft(
     draft: MessageRef, expected_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-) -> Response[SendReceipt]:
+) -> MessageResponse[SendReceipt]:
     """Submit an inspected plain-text draft. Requires explicit user authorization to send.
 
     Args:
         draft: Entry and store identity returned when creating the draft.
         expected_digest: Returned digest of body, subject, recipients, and sending account.
     """
-    return desktop.run("send_draft", SendReceipt, draft=draft, expected_digest=expected_digest)
+    return with_presentation(
+        desktop.run("send_draft", SendReceipt, draft=draft, expected_digest=expected_digest)
+    )
 
 
 @tool(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)

@@ -17,7 +17,7 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 
-// The window is never shown; the STA message loop owns all WebView2 objects.
+// The STA message loop owns the hidden session and an explicitly requested inspection view.
 public sealed class TeamsSession : ApplicationContext
 {
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
@@ -34,7 +34,11 @@ public sealed class TeamsSession : ApplicationContext
     const int MaxFrame = 1048576;
     static readonly JavaScriptSerializer Json =
         new JavaScriptSerializer { MaxJsonLength = MaxFrame };
-    readonly Form host = new Form();
+    sealed class InspectionForm : Form
+    {
+        protected override bool ShowWithoutActivation { get { return true; } }
+    }
+    readonly Form host = new InspectionForm();
     readonly string sdk, profile, pipeName, generation, expectedAccount;
     readonly int parentId;
     readonly CancellationTokenSource stop = new CancellationTokenSource();
@@ -48,7 +52,7 @@ public sealed class TeamsSession : ApplicationContext
     Form auxiliaryHost;
     FileStream profileLock;
     System.Windows.Forms.Timer foregroundTimer;
-    bool initializing, interference;
+    bool initializing, interference, inspectionVisible;
     string error = "loading";
     string currentAccountName;
     string groupScript;
@@ -85,18 +89,27 @@ public sealed class TeamsSession : ApplicationContext
                               .Trim()
                               .ToLowerInvariant();
         host.ShowInTaskbar = false;
+        host.Text = "Office Bridge - Teams";
         host.ClientSize = new Size(1200, 900);
+        host.FormClosing += CloseInspection;
         var handle = host.Handle;
         foregroundTimer = new System.Windows.Forms.Timer { Interval = 500 };
         foregroundTimer.Tick += (s, e) =>
         {
-            if (host.Visible || OwnedForeground())
+            if (!inspectionVisible && (host.Visible || OwnedForeground()))
                 interference = true;
         };
         foregroundTimer.Start();
         host.BeginInvoke(new Action(async () => await Initialize()));
         Task.Run(() => Serve());
         Task.Run(() => MonitorParent());
+    }
+    void CloseInspection(object sender, FormClosingEventArgs e)
+    {
+        if (e.CloseReason != CloseReason.UserClosing || !inspectionVisible) return;
+        e.Cancel = true;
+        ((Form)sender).Hide();
+        inspectionVisible = false;
     }
     async Task Initialize()
     {
@@ -120,6 +133,7 @@ public sealed class TeamsSession : ApplicationContext
             controller.Bounds = new Rectangle(0, 0, 1200, 900);
             controller.IsVisible = true;
             var core = controller.CoreWebView2;
+            core.IsMuted = false;
             core.Settings.IsWebMessageEnabled = false;
             core.Settings.AreHostObjectsAllowed = false;
             core.Settings.AreDefaultScriptDialogsEnabled = false;
@@ -213,6 +227,7 @@ public sealed class TeamsSession : ApplicationContext
             auxiliaryController.Bounds = new Rectangle(0, 0, 1200, 900);
             auxiliaryController.IsVisible = true;
             var core = auxiliaryController.CoreWebView2;
+            core.IsMuted = false;
             core.FrameCreated += (s, e) => TrackAuxiliaryFrame(e.Frame);
             core.Settings.IsWebMessageEnabled = false;
             core.Settings.AreHostObjectsAllowed = false;
@@ -255,6 +270,7 @@ public sealed class TeamsSession : ApplicationContext
             copilotController.Bounds = new Rectangle(0, 0, 1200, 900);
             copilotController.IsVisible = true;
             var created = copilotController.CoreWebView2;
+            created.IsMuted = false;
             created.Settings.IsWebMessageEnabled = false;
             created.Settings.AreHostObjectsAllowed = false;
             created.Settings.AreDefaultScriptDialogsEnabled = false;
@@ -1050,7 +1066,7 @@ public sealed class TeamsSession : ApplicationContext
         string state = error, hostname = "teams.cloud.microsoft", path = "/";
         bool account = false;
         var samples = new List<Dictionary<string, object>>();
-        if (host.Visible || OwnedForeground())
+        if (!inspectionVisible && (host.Visible || OwnedForeground()))
             interference = true;
         if (controller != null && !interference && error != "browser_failed")
         {
@@ -1126,6 +1142,9 @@ public sealed class TeamsSession : ApplicationContext
                                                 { "backend", "webview2" },
                                                 { "account_verified", account },
                                                 { "host_visible", host.Visible },
+                                                { "audio_muted", controller != null && controller.CoreWebView2.IsMuted &&
+                                                  (auxiliaryController == null || auxiliaryController.CoreWebView2.IsMuted) &&
+                                                  (copilotController == null || copilotController.CoreWebView2.IsMuted) },
                                                 { "control_visible", IsWindowVisible(host.Handle) },
                                                 { "host_focused", OwnedForeground() },
                                                 { "host_owned", true },
@@ -1196,7 +1215,7 @@ public sealed class TeamsSession : ApplicationContext
             }
             return await FindChats(args);
         }
-        if (op == "shutdown")
+        if (op == "shutdown" || op == "set_visibility")
         {
             object raw;
             object token;
@@ -1207,6 +1226,16 @@ public sealed class TeamsSession : ApplicationContext
                 Convert.ToString(token) !=
                     Environment.GetEnvironmentVariable("OFFICE_TEAMS_SHUTDOWN_TOKEN"))
                 throw new InvalidDataException();
+            if (op == "set_visibility")
+            {
+                object visible;
+                if (!args.TryGetValue("visible", out visible) || !(visible is bool))
+                    throw new InvalidDataException();
+                inspectionVisible = (bool)visible;
+                if (inspectionVisible) host.Show();
+                else host.Hide();
+                return new Dictionary<string, object> { { "visible", host.Visible } };
+            }
             return new Dictionary<string, object> { { "shutdown", true } };
         }
         if (op == "teams_web_probe_mention_picker")

@@ -79,8 +79,11 @@ class MailDraft(Model):
 
 class SendReceipt(Model):
     draft: MessageRef
-    status: Literal["submitted"]
+    status: Literal["submitted", "already_submitted"]
     submitted_at: datetime
+    subject: str | None = None
+    body_text: str | None = None
+    body_truncated: bool = False
 
 
 class ArchiveReceipt(Model):

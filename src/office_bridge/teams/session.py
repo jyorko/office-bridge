@@ -76,6 +76,7 @@ def invoke(operation: str, arguments: dict, timeout: float = 60) -> dict:
         "teams_web_react_message",
         "teams_web_set_reaction",
         "shutdown",
+        "set_visibility",
     }:
         raise SessionError("invalid_operation")
     name = os.environ.get("OFFICE_TEAMS_PIPE", "")

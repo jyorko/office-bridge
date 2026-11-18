@@ -166,8 +166,11 @@ try{
    $account=Effective-Account $item
    [void]$item.GetType().InvokeMember('SendUsingAccount',[Reflection.BindingFlags]::SetProperty,$null,$item,@($account.PSObject.BaseObject))
    if((Digest $item) -cne $a.expected_digest){Fail 'stale_draft'}
+   $subject=[string]$item.Subject
+   $body=[string]$item.Body
+   $preview=$body.Substring(0,[Math]::Min($body.Length,20000))
    $mutationStarted=$true;$item.Send()
-   $result=@{draft=$a.draft;status='submitted';submitted_at=(Stamp (Get-Date))}
+   $result=@{draft=$a.draft;status='submitted';submitted_at=(Stamp (Get-Date));subject=$subject;body_text=$preview;body_truncated=($body.Length -gt 20000)}
   }
   'archive' {
    $item=Get-Mail $a.message;Check-Version $item $a.expected_source;$inbox=$ns.GetDefaultFolder(6)

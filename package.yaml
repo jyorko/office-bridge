@@ -38,6 +38,7 @@ dev-tasks:
   complete-startup: python scripts/complete_startup.py
   complete-startup-dev: python scripts/complete_startup.py --dev
   verify-teams-dev: python scripts/verify_teams_web.py --dev --count 2
+  verify-canvas: python scripts/verify_canvas.py
   register: python scripts/register_mcp.py
   register-dev: python scripts/register_mcp.py --dev
   export-openapi: python scripts/export_openapi.py

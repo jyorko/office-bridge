@@ -27,6 +27,10 @@ The server runs hidden in your Windows user session. It is not a Windows service
 - Full live API: `<printed server URL>/openapi.json`
 - Saved API: [docs/api/openapi.json](docs/api/openapi.json)
 
+## Message views
+
+Outlook mail, Teams conversations and send receipts share a reading view alongside each action’s original result. Inbox rows expand to show returned mail details. The unread filter, history previews and message disclosures work locally. The native MCP App and T3 show the view inline. Ordinary Codex opens the same document in a dedicated, non-activating WebView2 window. The viewer receives HTML over a pipe, uses an InPrivate controller and reuses an open window across action workers. The [presentation guide](.agents/skills/office-bridge-mcp/references/presentation.md) covers client discovery, explicit window opening in T3 and text fallback.
+
 ## Layout
 
 ```text
@@ -47,7 +51,7 @@ docs/                        Architecture, operations, and API reference
 
 The official Actions Runtime serves the project directly from `package.yaml` and `src/`. `.state` stores private local task state. `.runtime` is an ignored legacy disposable environment; it is not required. `.package` is generated and not published.
 
-All WebView2 implementation code is in `src/office_bridge/native/teams/`. Its SDK installer and process supervisor are in `src/office_bridge/runtime/`. Bootstrap recreates generated files from those sources. See [local data](docs/operations.md#local-data) for the separate browser profile and private configuration.
+All Teams WebView2 implementation code is in `src/office_bridge/native/teams/`. Its SDK installer and process supervisor are in `src/office_bridge/runtime/`. Primary, auxiliary and Copilot WebView2 controllers allow browser audio and report their mute state through `teams_web_status`. Bootstrap recreates generated files from those sources. See [local data](docs/operations.md#local-data) for the separate browser profile and private configuration.
 
 ## Verify
 

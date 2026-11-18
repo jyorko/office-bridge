@@ -3,8 +3,10 @@
 from typing import Annotated, Literal
 
 from actions import ActionError, Response, action
+from actions.mcp import tool
 from pydantic import Field, RootModel
 
+from office_bridge.presentation import MESSAGE_UI, MessageResponse, with_presentation
 from office_bridge.teams import backend, lookup, messages, service, work_tracking
 from office_bridge.teams.messages import (
     MentionEvidenceReport,
@@ -85,18 +87,18 @@ def teams_web_find_chats(
         raise ActionError(str(error)) from None
 
 
-@action(is_consequential=False)
+@tool(read_only_hint=True, destructive_hint=False, open_world_hint=True, meta=MESSAGE_UI)
 def teams_web_read_chat(
     chat: WebChatRef,
     limit: Annotated[int, Field(ge=1, le=50)] = 20,
-) -> Response[WebChatHistory]:
+) -> MessageResponse[WebChatHistory]:
     """Read a bounded chat history, loading older messages up to the requested limit.
 
     Args:
         chat: Exact chat reference returned by teams_web_find_chats or teams_web_list_chats.
         limit: Maximum messages to collect, up to 50; fewer may return at the time bound.
     """
-    return _respond(service.read_chat, chat, limit)
+    return with_presentation(_respond(service.read_chat, chat, limit))
 
 
 @action(is_consequential=False)
@@ -117,14 +119,14 @@ def teams_web_inspect_mention_evidence(
     return _respond(messages.inspect_mention_evidence, chat, message_id)
 
 
-@action(is_consequential=True)
+@tool(read_only_hint=False, destructive_hint=True, idempotent_hint=False, meta=MESSAGE_UI)
 def teams_web_send_chat(
     chat: WebChatRef,
     body: Annotated[str, Field(min_length=1, max_length=2000)],
     request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
     body_format: Literal["plain", "markdown"] = "plain",
     mentions: PersonMentions = PersonMentions([]),
-) -> Response[GroupReceipt]:
+) -> MessageResponse[GroupReceipt]:
     """Send one message to the verified exact chat reference at most once per request ID.
 
     Args:
@@ -136,7 +138,9 @@ def teams_web_send_chat(
             host must report person_mentions_v1 before any send reservation is created. Notification
             delivery is not verified.
     """
-    return _respond(service.send_chat, chat, body, request_id, body_format, mentions)
+    return with_presentation(
+        _respond(service.send_chat, chat, body, request_id, body_format, mentions)
+    )
 
 
 @action(is_consequential=True)

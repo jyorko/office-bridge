@@ -1,0 +1,17 @@
+# Display mail and chat
+
+Present the result of the requested operation once. Inbox, search, single-message, chat-history and send tools return their original `result`/`error` envelope and can include `presentation` with `view`, `view_id` and script-free `html`. A rendered receipt describes the status the service observed. Outlook `submitted` confirms submission to Outlook. `already_submitted` refers to a previously recorded submission, even if an older receipt has no subject or body. Teams distinguishes `observed` from `already_observed`.
+
+## Choose the display route
+
+1. Check whether the client already displayed the native Office Bridge MCP App for this result. An actual inline view completes presentation. Resource metadata or a tool's presence alone does not establish that it rendered.
+2. In T3 Code, use inline presentation only. Discover both `html_preview` and `html_render` by tool name, including deferred or namespaced tools. Pass the existing `presentation.html` inline to preview, then pass the same HTML to render once with a generic title and the preview's `contentHeight` bounded to 80–2000. Keep private Office HTML out of workspace files. If either inline tool is absent or fails, show the available text. T3's identity still applies when its catalog is incomplete. A separate window requires an explicit user request or a click on the app's supported **Open in window** control.
+3. Outside T3, when the client has no displayed native view, automatically call `office_open_message_view` with the exact `view_id` and complete `view` from the result. Ordinary Codex uses this route. The tool opens an isolated Office Bridge WebView2 window. Reuse the same ID and fields for display retries. A closed window can be reopened. If the window call fails, show the text.
+
+## Resolve catalog and result differences
+
+Discover tools on the correct provider. T3 owns `html_preview` and `html_render`. The registered `desktop-office` server owns `office_open_message_view` and `office_present_messages`. Search client tools first. If a desktop-office helper is missing from the client cache, read the owning checkout from `references/installation.md` when installed globally. Use its `scripts/mcp_client.py` `MCPClient` to query all `tools/list` pages at the recorded `.state/server.json` endpoint. Call a helper only after confirming its name and input schema there. A successful HTTP schema lookup alone does not verify a callable MCP tool.
+
+Use `structuredContent` or the JSON in a text content block. For an older result without a presentation, derive display fields from the existing result and call `office_present_messages` once, then use the same routing rules. A missing helper, display limit or failed render never warrants another Office operation. Preserve errors, uncertainty, and unrecognized status strings in text. Never turn a draft or an unknown outcome into a success receipt.
+
+Use actual source, title, returned count, partial-result scope and timestamps. Mark unread, truncated bodies and loaded-history boundaries. Keep an individual email's body readable and long chat or receipt text expandable. Filters and selection act on the returned rows. When using text, include the returned body even if the view would initially collapse it. Exclude internal identifiers, attachment paths and digests. After successful rendering, add prose only for additional information the user needs.

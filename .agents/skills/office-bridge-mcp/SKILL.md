@@ -22,3 +22,4 @@ Read the relevant guide only when using that area:
 - [Teams actions](references/teams.md) for chat lookup, read, send, edit, links, and reactions.
 - [Work tracking](references/work-tracking.md) for opt-in Eyes claims on assigned task messages.
 - [Copilot, Outlook, and evidence packs](references/office-workflows.md) for those action families.
+- [Message presentation](references/presentation.md) for Outlook and Teams views in native MCP Apps, inline in T3, or in the isolated window for standalone clients.
