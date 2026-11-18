@@ -17,7 +17,13 @@ CHAT = WebChatRef(chat_id="19:canvas-fixture@thread.v2", title="Project chat")
 
 @pytest.mark.parametrize("status", ["observed", "already_observed"])
 def test_teams_send_keeps_receipt_and_displays_observed_status(monkeypatch, status):
-    receipt = GroupReceipt(status=status, chat=CHAT, message_id="fixture", time="10:15")
+    receipt = GroupReceipt(
+        status=status,
+        chat=CHAT,
+        message_id="fixture",
+        time="10:15",
+        body_text="Ready <now> & reviewed",
+    )
     calls = []
 
     def send(*args):
@@ -39,7 +45,18 @@ def test_teams_send_keeps_receipt_and_displays_observed_status(monkeypatch, stat
             "already_observed": "Previously observed in Teams",
         }[status]
     )
-    assert "Ready" not in result.presentation.html
+    assert card.body == receipt.body_text
+    assert "Ready &lt;now&gt; &amp; reviewed" in result.presentation.html
+    assert result.presentation.view.detail == ""
+
+
+def test_old_teams_receipt_does_not_backfill_text_from_a_new_request(monkeypatch):
+    receipt = GroupReceipt(status="already_observed", chat=CHAT, message_id="fixture", time="10:15")
+    monkeypatch.setattr(teams_actions.service, "send_chat", lambda *args: receipt)
+    result = teams_actions.teams_web_send_chat(CHAT, "Do not invent this text", "fixture")
+    assert result.presentation.view.cards[0].body == ""
+    assert "Message text is unavailable" in result.presentation.view.detail
+    assert "Do not invent this text" not in result.presentation.html
 
 
 @pytest.mark.parametrize("failure", [OSError("missing asset"), RuntimeError("render failed")])

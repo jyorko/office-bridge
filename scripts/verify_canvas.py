@@ -21,7 +21,7 @@ from playwright.sync_api import sync_playwright
 import outlook_actions
 from office_bridge.canvas_window import start_viewer
 from office_bridge.outlook.models import InboxPage, MessageDetail, MessageVersion, ReplyDraft
-from office_bridge.presentation import Presentation, ReadMail, app_html, message_view, present
+from office_bridge.presentation import Presentation, ReadMail, View, app_html, message_view, present
 
 HOST = """<iframe sandbox="allow-scripts" title="Office" style="width:100%;height:900px;border:0"></iframe>
 <script>
@@ -313,6 +313,77 @@ def check_conversation_read(page, app):
     assert not app.get_by_role("button", name="Reply", exact=True).count()
 
 
+def check_rich_mail_ui(page, app):
+    view = {
+        "source": "Outlook",
+        "title": "Mail",
+        "cards": [
+            {
+                "kind": "mail",
+                "heading": "Scoring guide updates",
+                "detail": "Alex Morgan",
+                "body": "Please review the changes.\n\nQuestion\nChange\n2.2\nRevised response",
+                "body_html": "<p>Please review the changes.</p><p>&nbsp;</p>"
+                "<table><thead><tr><th>Question</th><th>Change</th></tr></thead>"
+                "<tbody><tr><td>2.2</td><td><strong>Revised response</strong></td></tr>"
+                "</tbody></table><script>window.mailScriptRan=true</script>"
+                '<img src="https://invalid.example/tracker">',
+            }
+        ],
+    }
+    display = present(View.model_validate(view)).model_dump(mode="json")
+    page.evaluate("window.deliver", {"structuredContent": {"presentation": display}})
+    app.get_by_role("columnheader", name="Question").wait_for()
+    assert app.get_by_role("cell", name="2.2").is_visible()
+    assert app.get_by_role("cell", name="Revised response").is_visible()
+    assert app.locator(".mail-body p").count() == 1
+    assert app.locator(".mail-body script,.mail-body img,.mail-body [style]").count() == 0
+    assert app.locator(".mail-body").evaluate("(node) => node.getBoundingClientRect().height < 230")
+    for width in (1100, 360):
+        page.set_viewport_size({"width": width, "height": 800})
+        assert app.locator("html").evaluate("(node) => node.scrollWidth <= node.clientWidth")
+    page.set_viewport_size({"width": 1100, "height": 800})
+    page.screenshot(
+        path=str(Path(__file__).resolve().parents[1] / ".state/mail-rendering-synthetic.png")
+    )
+
+
+def check_receipt_ui(page, app):
+    calls_before = page.evaluate("window.calls.length")
+    for text in ("Ready <now> & reviewed", "Review point\n" * 45, ""):
+        display = present(
+            message_view(
+                {
+                    "status": "observed",
+                    "chat": {"title": "Project review"},
+                    "time": "2026-11-18T14:30:00Z",
+                    "body_text": text,
+                    "mentions": [{"text": "Alex Morgan", "entity_verified": True}],
+                }
+            )
+        )
+        display.window = "Teams: Project review"
+        page.evaluate(
+            "window.deliver", {"structuredContent": {"presentation": display.model_dump()}}
+        )
+        app.get_by_role("heading", name="Project review", exact=True).wait_for()
+        assert app.get_by_text("Verified mentions", exact=True).is_visible()
+        assert app.get_by_text("Alex Morgan", exact=True).is_visible()
+        assert not app.get_by_role("button", name="Open in window").count()
+        if len(text) > 400:
+            app.get_by_text("Full message", exact=True).click()
+        if text:
+            assert app.locator(".body").is_visible()
+            assert app.locator(".body").text_content() == text
+        else:
+            assert app.get_by_text("Message text is unavailable in this receipt.").is_visible()
+        for width in (1100, 360):
+            page.set_viewport_size({"width": width, "height": 800})
+            assert app.locator("html").evaluate("(node) => node.scrollWidth <= node.clientWidth")
+    assert page.evaluate("window.calls.length") == calls_before
+    page.set_viewport_size({"width": 1100, "height": 800})
+
+
 def check_ui(resource, displays):
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel="msedge", headless=True)
@@ -361,6 +432,12 @@ def check_ui(resource, displays):
                         host.locator(".body").is_visible() and not host.locator("summary").count()
                     )
             assert not page.evaluate("window.calls")
+            if not display["view"]["cards"] or all(
+                card["kind"] == "receipt" for card in display["view"]["cards"]
+            ):
+                assert not app.get_by_role("button", name="Open in window").count()
+        display = displays[0]
+        page.evaluate("window.deliver", {"structuredContent": {"presentation": display}})
         app.get_by_role("button", name="Open in window").click()
         assert page.evaluate("window.calls") == [
             {
@@ -404,6 +481,8 @@ def check_ui(resource, displays):
             app.get_by_role("heading", name=title, exact=True).wait_for()
             assert not app.get_by_role("button").count()
         check_conversation_read(page, app)
+        check_rich_mail_ui(page, app)
+        check_receipt_ui(page, app)
         for outcome in ("saved", "error", "timeout"):
             mail_page = browser.new_page(viewport={"width": 360, "height": 800})
             mail_page.set_content(HOST)

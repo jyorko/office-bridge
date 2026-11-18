@@ -365,6 +365,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -915,6 +920,11 @@
                               "type": "boolean",
                               "title": "Can Create Reply Draft",
                               "default": false
+                            },
+                            "body_html": {
+                              "type": "string",
+                              "title": "Body Html",
+                              "default": ""
                             }
                           },
                           "additionalProperties": false,
@@ -1047,6 +1057,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -1714,6 +1729,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -2394,6 +2414,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -2969,6 +2994,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -4110,6 +4140,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -8144,6 +8179,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -8608,6 +8648,13 @@
                               "type": "array",
                               "title": "Mentions",
                               "description": "Observed mention entities. This does not verify that Teams delivered notifications."
+                            },
+                            "body_text": {
+                              "type": "string",
+                              "maxLength": 2000,
+                              "title": "Body Text",
+                              "description": "Verified visible message text. Older receipts may omit it.",
+                              "default": ""
                             }
                           },
                           "type": "object",
@@ -8732,6 +8779,11 @@
                                         "type": "boolean",
                                         "title": "Body Truncated",
                                         "default": false
+                                      },
+                                      "body_html": {
+                                        "type": "string",
+                                        "title": "Body Html",
+                                        "default": ""
                                       }
                                     },
                                     "type": "object",
@@ -12611,6 +12663,11 @@
                               "type": "boolean",
                               "title": "Body Truncated",
                               "default": false
+                            },
+                            "body_html": {
+                              "type": "string",
+                              "title": "Body Html",
+                              "default": ""
                             }
                           },
                           "type": "object",
@@ -12735,6 +12792,11 @@
                                 "type": "boolean",
                                 "title": "Body Truncated",
                                 "default": false
+                              },
+                              "body_html": {
+                                "type": "string",
+                                "title": "Body Html",
+                                "default": ""
                               }
                             },
                             "type": "object",

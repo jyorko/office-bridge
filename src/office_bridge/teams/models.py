@@ -180,6 +180,12 @@ class GroupReceipt(BaseModel):
     chat: WebChatRef
     message_id: str
     time: str
+    body_text: str = Field(
+        default="",
+        max_length=2000,
+        exclude_if=lambda text: not text,
+        description="Verified visible message text. Older receipts may omit it.",
+    )
     mentions: list[PersonMentionReceipt] = Field(
         default_factory=list,
         exclude_if=lambda mentions: not mentions,

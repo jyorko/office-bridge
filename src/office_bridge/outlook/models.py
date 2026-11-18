@@ -3,8 +3,9 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from office_bridge.mail_body import safe_mail_html
 from office_bridge.models import Identifier, Model
 
 
@@ -51,8 +52,11 @@ class MessageSummary(Model):
 class MessageDetail(MessageSummary):
     recipients: list[MailAddress]
     body_text: str
+    body_html: str = ""
     body_truncated: bool
     can_create_reply_draft: bool = False
+
+    _safe_html = field_validator("body_html")(safe_mail_html)
 
 
 class InboxQuery(Model):

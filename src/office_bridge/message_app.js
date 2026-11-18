@@ -41,7 +41,8 @@
   // Import the renderer's semantic markup only. A host result cannot add scripts,
   // URLs, styles, handlers or form submissions to the app's host bridge.
   const tags = new Set(
-    'HEADER DIV P H1 H2 I SPAN SECTION ARTICLE LABEL INPUT DETAILS SUMMARY DL DT DD'.split(
+    ('HEADER DIV P H1 H2 H3 H4 H5 H6 I SPAN SECTION ARTICLE LABEL INPUT DETAILS SUMMARY DL DT DD ' +
+     'BR STRONG B EM U S UL OL LI BLOCKQUOTE TABLE THEAD TBODY TFOOT TR TD TH PRE CODE HR').split(
       ' '
     )
   );
@@ -56,6 +57,11 @@
         copy.setAttribute(attr, node.getAttribute(attr));
     }
     if (node.tagName === 'INPUT') copy.type = 'checkbox';
+    if (['TD', 'TH'].includes(node.tagName))
+      for (const attr of ['colspan', 'rowspan'])
+        if (/^[1-9][0-9]?$/.test(node.getAttribute(attr) || '') &&
+            Number(node.getAttribute(attr)) <= 50)
+          copy.setAttribute(attr, node.getAttribute(attr));
     if (node.tagName === 'DETAILS' && node.hasAttribute('name'))
       copy.name = 'inbox';
     copy.append(...Array.from(node.childNodes, copyMarkup));
@@ -289,7 +295,10 @@
         if (bar.childElementCount) card.append(bar);
       });
     }
-    if (!isolated && windowLabel)
+    const isReceipt = view.cards.length &&
+      view.cards.every(card => card.kind === 'receipt');
+    const interactive = main.querySelector('.mail-actions button, .filter input, details');
+    if (!isolated && windowLabel && interactive && !isReceipt)
       actions.append(
         button('Open in window', async () => {
           if (pending || editor) return;
