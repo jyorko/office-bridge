@@ -149,10 +149,10 @@ def outlook_create_mail_draft(
     subject: Annotated[str, Field(min_length=1, max_length=250)],
     body_text: Text,
 ) -> Response[MailDraft]:
-    """Save a plain-text test email addressed only to the signed-in company user. Never sends.
+    """Save a plain-text email draft to one verified recipient. Never sends.
 
     Args:
-        recipient_email: The signed-in user's company email; other recipients are rejected.
+        recipient_email: Exact SMTP address of the intended recipient.
         subject: Plain-text subject, from 1 to 250 characters.
         body_text: Complete plain-text message body, at most 20000 characters.
     """

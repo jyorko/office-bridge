@@ -65,8 +65,7 @@ OUTLOOK_OPERATIONS = {
     "archive": "outlook_archive",
     "download_attachments": "outlook_download_attachments",
 }
-# Publish writes only after the host passes live mailbox acceptance.
-OUTLOOK_SUPPORTED = frozenset({"inbox_list", "get_message", "search_inbox"})
+OUTLOOK_SUPPORTED = frozenset(OUTLOOK_OPERATIONS)
 OUTLOOK_UNCERTAIN_MUTATIONS = frozenset(
     {"create_reply_draft", "create_mail_draft", "send_draft", "archive"}
 )
@@ -92,7 +91,13 @@ def invoke(operation: str, arguments: dict) -> dict:
         from office_bridge.outlook.session import invoke as invoke_outlook
 
         try:
-            timeout = 300 if operation == "download_attachments" else 90
+            timeout = (
+                300
+                if operation == "download_attachments"
+                else 35
+                if operation == "get_message"
+                else 90
+            )
             return invoke_outlook(OUTLOOK_OPERATIONS[operation], arguments, timeout=timeout)
         except SessionError as error:
             code = error.args[0] if error.args else "host_operation_failed"

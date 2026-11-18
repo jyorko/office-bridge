@@ -194,6 +194,20 @@
     const matches = messageRows().filter((row) => rowId(row) === id);
     return matches.length === 1 ? matches[0] : null;
   };
+  const bodyFingerprint = (element) => {
+    const text = element ? element.innerText || element.textContent || "" : "";
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index++)
+      hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+    return `${text.length}:${hash >>> 0}`;
+  };
+  const normalizedFingerprint = (text) => {
+    text = text.replace(/\s+/g, " ").trim();
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index++)
+      hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+    return `${text.length}:${hash >>> 0}`;
+  };
   const exactMessageNodes = (id) => {
     const attributes = [
       "data-itemid",
@@ -219,6 +233,26 @@
     Array.from(root.querySelectorAll('button,[role="button"],a[tabindex]')).filter(
       visible,
     );
+  const isToField = (element, root) => {
+    const labels = [
+      label(element), element.getAttribute("placeholder") || "",
+      ...Array.from(element.labels || [], node => node.textContent || ""),
+      ...(element.getAttribute("aria-labelledby") || "").split(/\s+/)
+        .map(id => document.getElementById(id)?.textContent || ""),
+    ];
+    if (labels.some(value => /^to(?:\b|:)/i.test(value.trim()))) return true;
+    if (element.getAttribute("role") !== "combobox") return false;
+    for (let ancestor = element.parentElement; ancestor && ancestor !== root.parentElement;
+         ancestor = ancestor.parentElement) {
+      const fields = Array.from(ancestor.querySelectorAll('input[role="combobox"]')).filter(visible);
+      if (fields.length > 1) break;
+      const named = Array.from(ancestor.querySelectorAll('[aria-label],[title],button,[role="button"],label,span,div'))
+        .filter(visible).some(node => /^to:?$/i.test(label(node)) ||
+          /^to:?$/i.test(cleanText(node).join(" ")));
+      if (fields.length === 1 && named) return true;
+    }
+    return false;
+  };
   const composerParts = (root) => {
     const editors = Array.from(
       root.querySelectorAll('[contenteditable="true"],[role="textbox"],textarea'),
@@ -234,10 +268,10 @@
     ).filter(visible);
     const recipientFields = Array.from(
       root.querySelectorAll(
-        'input[aria-label^="To" i],input[placeholder="To" i],' +
+        'input[role="combobox"],input[aria-label^="To" i],input[placeholder="To" i],' +
           '[role="textbox"][aria-label^="To" i]',
       ),
-    ).filter(visible);
+    ).filter(visible).filter(element => isToField(element, root));
     const sendButtons = visibleControls(root).filter((element) =>
       /^send(?:\s+now)?(?:\s*\(.*\))?$/i.test(label(element)),
     );
@@ -312,12 +346,14 @@
   const recipientEntries = (root) => {
     const emailPattern = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
     const entries = new Map();
+    const bodyEditors = Array.from(root.querySelectorAll('[contenteditable="true"]'))
+      .filter(element => /message body|message content|reply body/i.test(label(element)));
     const elements = Array.from(
       root.querySelectorAll(
         "[data-email],[data-smtp-address],a[href^='mailto:'],[data-recipient-type]," +
           '[role="button"][aria-label*="@"],[title*="@"]',
       ),
-    ).filter(visible);
+    ).filter(visible).filter(element => !bodyEditors.some(body => body.contains(element)));
     for (const element of elements) {
       const rawAddress =
         element.getAttribute("data-email") ||
@@ -415,7 +451,129 @@
       ).length,
     };
   };
+  const composerToken = (value) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (/^to(?:\b|:)/i.test(text)) return "to";
+    if (/^cc(?:\b|:)/i.test(text)) return "cc";
+    if (/^bcc(?:\b|:)/i.test(text)) return "bcc";
+    if (/^subject\b/i.test(text)) return "subject";
+    if (/\bsearch\b/i.test(text)) return "search";
+    if (/\brecipient/i.test(text)) return "recipient";
+    if (/\bemail\b/i.test(text)) return "email";
+    if (/\baddress\b/i.test(text)) return "address";
+    if (/\bname\b/i.test(text)) return "name";
+    if (/\bsaving\b/i.test(text)) return "saving";
+    if (/\bsaved\b/i.test(text)) return "saved";
+    return "";
+  };
+  const composerFieldEvidence = (element, root) => {
+    const relationNodes = (attribute) =>
+      (element.getAttribute(attribute) || "").split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById(id)).filter(Boolean);
+    const categoryList = (values) => Array.from(new Set(
+      values.map(composerToken).filter(Boolean),
+    ));
+    const directLabels = [
+      label(element),
+      element.getAttribute("placeholder") || "",
+    ];
+    const associatedLabels = Array.from(element.labels || [], label);
+    const labelledBy = relationNodes("aria-labelledby").map(label);
+    const describedBy = relationNodes("aria-describedby").map(label);
+    return {
+      role: element.getAttribute("role") || "",
+      label_categories: categoryList(directLabels),
+      associated_label_count: associatedLabels.length,
+      associated_label_categories: categoryList(associatedLabels),
+      labelledby_count: labelledBy.length,
+      labelledby_categories: categoryList(labelledBy),
+      describedby_count: describedBy.length,
+      describedby_categories: categoryList(describedBy),
+      in_composer: root.contains(element),
+      search_scope: !!element.closest('[role="search"]'),
+      to_relation: isToField(element, root),
+    };
+  };
+  const composerProbeSnapshot = (root, snapshot) => {
+    const parts = composerParts(root);
+    const subject = typeof snapshot.subject === "string" ? snapshot.subject : "";
+    const bodyText = typeof snapshot.body_text === "string" ? snapshot.body_text : "";
+    const recipients = Array.isArray(snapshot.recipients) ? snapshot.recipients : [];
+    const controls = Array.from(
+      document.querySelectorAll('input[role="combobox"]'),
+    ).filter(visible).slice(0, 12).map(element => composerFieldEvidence(element, root));
+    const savedMarkers = Array.from(root.querySelectorAll(
+      "[aria-label],[title],[data-testid],[role=status]",
+    )).filter(visible).filter(element =>
+      /\bsaved\b/i.test(label(element)) && !/\bsaving\b/i.test(label(element)),
+    );
+    const outsideSavedMarkers = Array.from(document.querySelectorAll(
+      "[aria-label],[title],[data-testid],[role=status]",
+    )).filter(visible).filter(element =>
+      !root.contains(element) && /\bsaved\b/i.test(label(element)) &&
+        !/\bsaving\b/i.test(label(element)),
+    );
+    const recipientTypeCounts = { to: 0, cc: 0, bcc: 0 };
+    for (const recipient of recipients) {
+      const type = Number(recipient.recipient_type);
+      if (type >= 1 && type <= 3)
+        recipientTypeCounts[["", "to", "cc", "bcc"][type]]++;
+    }
+    return {
+      state: snapshot.state,
+      subject_chars: subject.length,
+      subject_empty: !subject.trim(),
+      body_chars: bodyText.length,
+      body_whitespace_only: !bodyText.trim(),
+      recipient_count: recipients.length,
+      recipient_type_counts: recipientTypeCounts,
+      recipient_chip_candidate_count: Array.from(root.querySelectorAll(
+        "[data-email],[data-smtp-address],a[href^='mailto:'],[data-recipient-type]," +
+          '[role="button"][aria-label*="@"],[title*="@"]',
+      )).filter(visible).length,
+      attachment_count: snapshot.attachment_count || 0,
+      saved: snapshot.saved === true,
+      saved_marker_count_in_composer: savedMarkers.length,
+      saved_marker_count_outside_composer: outsideSavedMarkers.length,
+      draft_identity_candidate_count: snapshot.draft_identity_candidate_count || 0,
+      draft_identity_present: !!snapshot.entry_id,
+      conversation_identity_present: !!snapshot.conversation_id,
+      body_editor_count: parts.bodyEditors.length,
+      subject_field_count: parts.subjectFields.length,
+      to_field_count: parts.recipientFields.length,
+      visible_combobox_count: controls.length,
+      recipient_controls_outside_composer: controls.filter(control =>
+        !control.search_scope && !control.in_composer,
+      ).length,
+      recipient_controls_without_to_relation: controls.filter(control =>
+        !control.search_scope && !control.to_relation,
+      ).length,
+      recipient_controls: controls,
+      reply_marker_count: Array.from(root.querySelectorAll(
+        "[aria-label],[title],[data-testid],[data-automationid]",
+      )).filter(visible).filter(element =>
+        /\breply\b/i.test(
+          (element.getAttribute("aria-label") || "") + " " +
+          (element.getAttribute("title") || "") + " " +
+          (element.getAttribute("data-testid") || "") + " " +
+          (element.getAttribute("data-automationid") || ""),
+        ),
+      ).length,
+    };
+  };
   const inspectSelectedMessageIdentity = (openDetails) => {
+    if (hasComposer()) {
+      if (openDetails) return { state: "draft_exists" };
+      const root = selectedComposer();
+      const snapshot = root ? composeSnapshot(root) : null;
+      return {
+        state: "composer_inspected",
+        root_count: composerRoots().length,
+        composer: root && snapshot
+          ? composerProbeSnapshot(root, snapshot)
+          : { state: snapshot ? snapshot.state : "composer_unavailable" },
+      };
+    }
     const regions = Array.from(
       document.querySelectorAll(
         '[role="document"],[data-testid*="message-body" i],' +
@@ -678,6 +836,16 @@
       return {
         state: messageRows().length ? "not_visible" : "message_not_found",
       };
+    const priorBody = Array.from(document.querySelectorAll('[role="document"]'))
+      .filter(visible);
+    window.__officeOutlookReadSelection = {
+      conversation: request.conversation_id,
+      wasSelected: row.getAttribute("aria-selected") === "true",
+      priorBody: priorBody.length === 1 ? priorBody[0] : null,
+      priorFingerprint: priorBody.length === 1 ? bodyFingerprint(priorBody[0]) : "",
+      fingerprint: "",
+      stableSince: performance.now(),
+    };
     row.click();
     return { state: "opening", conversation_id: request.conversation_id };
   }
@@ -699,7 +867,33 @@
     );
     if (!bodyRegions.length) return { state: "waiting" };
     if (bodyRegions.length !== 1) return { state: "message_identity_ambiguous" };
-    const bodyRegion = bodyRegions[0];
+    let bodyRegion = bodyRegions[0];
+    if (Array.isArray(request.body_fingerprints)) {
+      if (!request.body_fingerprints.length) return { state: "waiting" };
+      const matches = [bodyRegion, ...bodyRegion.querySelectorAll("div,table,section,p")]
+        .filter(visible).filter(element => request.body_fingerprints.includes(
+          normalizedFingerprint(element.textContent || ""),
+        ));
+      const roots = matches.filter(element =>
+        !matches.some(other => other !== element && other.contains(element)));
+      if (!roots.length) return { state: "waiting" };
+      if (roots.length !== 1) return { state: "message_identity_ambiguous" };
+      bodyRegion = roots[0];
+    }
+    const selection = window.__officeOutlookReadSelection;
+    if (selection && selection.conversation === request.conversation_id) {
+      const fingerprint = bodyFingerprint(bodyRegion);
+      if (!selection.wasSelected && selection.priorBody === bodyRegion &&
+          selection.priorFingerprint === fingerprint)
+        return { state: "waiting" };
+      if (selection.fingerprint !== fingerprint) {
+        selection.fingerprint = fingerprint;
+        selection.stableSince = performance.now();
+        return { state: "waiting" };
+      }
+      if (performance.now() - selection.stableSince < 400)
+        return { state: "waiting" };
+    }
     const body = (bodyRegion.innerText || bodyRegion.textContent || "").trim();
     const card =
       bodyRegion.closest('article,[role="article"]') ||
@@ -741,6 +935,7 @@
       dom_message_id: messageId,
       identity_candidate_count: identities.length,
       body_text: body.slice(0, 20001),
+      body_binding_text: (bodyRegion.textContent || "").slice(0, 200000),
       body_truncated: body.length > 20000,
       recipients: recipientEntries(card),
     };
@@ -848,6 +1043,12 @@
     if (snapshot.state !== "composer_ready" || !snapshot.saved)
       return { state: "draft_not_saved" };
     if (
+      request.host_entry_id &&
+      (snapshot.draft_identity_candidate_count !== 1 ||
+        snapshot.entry_id !== request.host_entry_id)
+    )
+      return { state: "draft_identity_unavailable" };
+    if (
       !request.host_identity_verified &&
       (snapshot.draft_identity_candidate_count !== 1 || !snapshot.entry_id)
     )
@@ -855,13 +1056,9 @@
     const closeButtons = visibleControls(root).filter((element) =>
       /^(close|close compose)$/i.test(label(element)),
     );
-    if (closeButtons.length > 1) return { state: "composer_ambiguous" };
-    if (closeButtons.length === 1) closeButtons[0].click();
-    else {
-      const drafts = folderItems("Drafts");
-      if (drafts.length !== 1) return { state: "draft_not_saved" };
-      drafts[0].click();
-    }
+    if (closeButtons.length !== 1)
+      return { state: closeButtons.length ? "composer_ambiguous" : "draft_not_saved" };
+    closeButtons[0].click();
     return { state: "draft_saved", draft: snapshot };
   }
 

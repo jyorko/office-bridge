@@ -36,6 +36,7 @@ function Filter([string]$url) { $filter.Invoke($null, @($url)) }
 if ((Filter 'https://outlook.office.com/owa/service.svc?action=GetConversationItems') -ne 'GetConversationItems') { throw 'Allowlisted action rejected' }
 if ((Filter 'https://outlook.cloud.microsoft/owa/0/service.svc?action=GetConversationItems') -ne 'GetConversationItems') { throw 'Numbered mailbox path rejected' }
 if ((Filter 'https://outlook.cloud.microsoft/owa/me/service.svc?action=GetConversationItems') -ne 'GetConversationItems') { throw 'Current mailbox path rejected' }
+if ((Filter 'https://outlook.cloud.microsoft/owa/user%40example.test/service.svc?app=Mail') -ne 'MailService') { throw 'Mailbox-address RPC rejected' }
 if ((Filter 'https://outlook.office.com/api/beta/me/Microsoft.OutlookServices.GetConversationItems') -ne 'RestItems') { throw 'REST conversation route rejected' }
 if ((Filter 'https://outlook.office.com/ows/v1.0/mailbox/items/message') -ne 'RestItems') { throw 'REST item route rejected' }
 if ((Filter 'https://outlook.office.com/owa/service.svc?app=Mail') -ne 'MailService') { throw 'Unlabelled mail RPC route rejected' }
@@ -84,6 +85,13 @@ $record = $records['conversation-a'][0]
 if ($record['entry_id'] -cne 'item-a' -or -not $record['complete'] -or $record['is_draft']) { throw 'Typed response was not reduced' }
 if ($json.Serialize($records).Contains('unchanged')) { throw 'Response body retained' }
 if ($parsed['Body']['Items'][0]['Body']['Value'] -cne 'literal {"__type":"unchanged"}') { throw 'Body text changed during parsing' }
+$bodyHash = $type.GetMethod('BodyDigest', $static)
+$html = $parse.Invoke($null, @('{"ItemId":{"Id":"body-item","ChangeKey":"v1"},"ConversationId":{"Id":"body-conversation"},"IsDraft":false,"HasAttachments":false,"ToRecipients":[],"CcRecipients":[],"Body":{"BodyType":"HTML","Value":"<style>hidden</style><p>Verified &amp; selected</p><script>unsafe()</script>"}}'))
+$record = $reduce.Invoke($null, @($html))['body-conversation'][0]
+if ($record['body_hashes'].Count -ne 1 -or $record['body_hashes'][0] -cne $bodyHash.Invoke($null, @('Verified & selected'))) { throw 'Displayed body was not bound to response' }
+if ($record['body_hashes'][0] -ceq $bodyHash.Invoke($null, @('Previous message'))) { throw 'Different displayed body accepted' }
+$action = $type.GetMethod('ResponseAction', $static)
+if ($action.Invoke($null, @($parsed, 'MailService')) -cne 'GetConversationItems') { throw 'Worker conversation action lost' }
 $graph = $parse.Invoke($null, @('{"id":"graph-item","changeKey":"graph-version","conversationId":"graph-conversation","isDraft":false,"hasAttachments":false,"toRecipients":[{"emailAddress":{"name":"Self","address":"self@example.test"}}],"ccRecipients":[],"from":{"emailAddress":{"name":"Sender","address":"sender@example.test"}}}'))
 $records = $reduce.Invoke($null, @($graph))
 $record = $records['graph-conversation'][0]

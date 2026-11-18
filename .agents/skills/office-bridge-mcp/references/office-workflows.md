@@ -15,8 +15,9 @@ Use a unique request ID for an authorized question. Read by that same ID to coll
 - The controller enables audio before navigation. The normal launcher keeps it hidden. Show it only when the user asks to inspect the isolated verification window.
 - `outlook_inbox_list(limit?, unread_only?)` and `outlook_search_inbox(query, limit?)` return conversation references. Outlook's list exposes conversation IDs. Pass a returned reference to `outlook_get_message(message)` to resolve an exact item ID. Do not use a conversation ID as a message ID.
 - `MessageVersion.version_digest` binds the observed message content and flags. The adapter leaves `modified_at` null when it has no exact modification time. Use the version returned by `outlook_get_message` for any future mutation.
-- The current live probe has verified mailbox identity and returned a bounded conversation list. It has not verified that the opened message pane exposes one exact item ID. `outlook_get_message` fails closed until the host proves that identity.
-- Draft, reply, attachment, send, and archive handlers remain unavailable and return `outlook_operation_unavailable`. Do not call them until their WebView2 handlers pass synthetic tests and the read-only exact-message smoke succeeds.
+- Selected-message reads have passed live Windows verification. The host observes Outlook's background-worker responses and requires one non-draft message whose body digest matches the visible reading pane. Missing or ambiguous evidence stops the read.
+- Draft, reply, attachment, send, and archive routes are enabled. Reply requires a complete source version and available composer controls. Creating a draft never sends it. Sending and archiving require separate explicit authorization; uncertain mutations must not be replayed.
+- `outlook_create_mail_draft(recipient_email, subject, body_text)` resolves and verifies the exact recipient address before saving a plain-text draft.
 ## Evidence packs
 
 `evidence_pack_create(pack)` packages caller-authored summary text, explicit source records (`reference`, `captured_at`, `content`), and coverage limitations. It does not fetch or independently verify sources. Packs allow up to 100 sources and 1 MiB total.

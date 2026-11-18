@@ -585,6 +585,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -1256,6 +1267,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -1912,6 +1934,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -2581,6 +2614,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -3145,6 +3189,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -3183,7 +3238,7 @@
     "/api/actions/desktop-office/outlook-create-mail-draft/run": {
       "post": {
         "summary": "Outlook Create Mail Draft",
-        "description": "Save a plain-text test email addressed only to the signed-in company user. Never sends.",
+        "description": "Save a plain-text email draft to one verified recipient. Never sends.",
         "operationId": "outlook_create_mail_draft",
         "requestBody": {
           "content": {
@@ -3193,7 +3248,7 @@
                   "recipient_email": {
                     "type": "string",
                     "title": "Recipient Email",
-                    "description": "The signed-in user's company email; other recipients are rejected."
+                    "description": "Exact SMTP address of the intended recipient."
                   },
                   "subject": {
                     "type": "string",
@@ -4275,6 +4330,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -8298,6 +8364,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -8875,6 +8952,17 @@
                                 }
                               ],
                               "title": "Window Proof"
+                            },
+                            "window": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window"
                             }
                           },
                           "type": "object",
@@ -12896,6 +12984,17 @@
                         }
                       ],
                       "title": "Window Proof"
+                    },
+                    "window": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Window"
                     }
                   },
                   "type": "object",
@@ -12935,319 +13034,18 @@
                   "view_id": {
                     "type": "string",
                     "title": "View Id",
-                    "description": "Opaque identity returned in the existing presentation. Reuse it for display retries."
+                    "description": "Opaque identity returned in that presentation. Reuse both fields for display retries."
                   },
-                  "view": {
-                    "properties": {
-                      "source": {
-                        "type": "string",
-                        "enum": [
-                          "Outlook",
-                          "Teams",
-                          "Office"
-                        ],
-                        "title": "Source",
-                        "default": "Office"
-                      },
-                      "title": {
-                        "type": "string",
-                        "title": "Title",
-                        "default": "Messages"
-                      },
-                      "detail": {
-                        "type": "string",
-                        "title": "Detail",
-                        "default": ""
-                      },
-                      "empty": {
-                        "type": "string",
-                        "title": "Empty",
-                        "default": "No messages found"
-                      },
-                      "cards": {
-                        "items": {
-                          "properties": {
-                            "kind": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    "mail",
-                                    "chat",
-                                    "receipt"
-                                  ]
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ],
-                              "title": "Kind"
-                            },
-                            "heading": {
-                              "type": "string",
-                              "title": "Heading"
-                            },
-                            "detail": {
-                              "type": "string",
-                              "title": "Detail",
-                              "default": ""
-                            },
-                            "body": {
-                              "type": "string",
-                              "title": "Body",
-                              "default": ""
-                            },
-                            "unread": {
-                              "anyOf": [
-                                {
-                                  "type": "boolean"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ],
-                              "title": "Unread"
-                            },
-                            "timestamp": {
-                              "type": "string",
-                              "title": "Timestamp",
-                              "default": ""
-                            },
-                            "facts": {
-                              "additionalProperties": {
-                                "type": "string"
-                              },
-                              "type": "object",
-                              "title": "Facts"
-                            },
-                            "body_truncated": {
-                              "type": "boolean",
-                              "title": "Body Truncated",
-                              "default": false
-                            }
-                          },
-                          "type": "object",
-                          "required": [
-                            "heading"
-                          ],
-                          "title": "Card"
-                        },
-                        "type": "array",
-                        "maxItems": 50,
-                        "title": "Cards"
-                      },
-                      "mail": {
-                        "anyOf": [
-                          {
-                            "properties": {
-                              "rows": {
-                                "items": {
-                                  "anyOf": [
-                                    {
-                                      "properties": {
-                                        "entry_id": {
-                                          "title": "Entry Id",
-                                          "anyOf": [
-                                            {
-                                              "type": "string",
-                                              "maxLength": 4096,
-                                              "minLength": 1
-                                            },
-                                            {
-                                              "type": "null"
-                                            }
-                                          ]
-                                        },
-                                        "store_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Store Id"
-                                        },
-                                        "conversation_id": {
-                                          "anyOf": [
-                                            {
-                                              "type": "string",
-                                              "maxLength": 4096,
-                                              "minLength": 1
-                                            },
-                                            {
-                                              "type": "null"
-                                            }
-                                          ],
-                                          "title": "Conversation Id"
-                                        }
-                                      },
-                                      "additionalProperties": false,
-                                      "type": "object",
-                                      "required": [
-                                        "store_id"
-                                      ],
-                                      "title": "MessageRef"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                },
-                                "type": "array",
-                                "maxItems": 50,
-                                "title": "Rows"
-                              }
-                            },
-                            "type": "object",
-                            "required": [
-                              "rows"
-                            ],
-                            "title": "ReadMail"
-                          },
-                          {
-                            "properties": {
-                              "source": {
-                                "properties": {
-                                  "entry_id": {
-                                    "title": "Entry Id",
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "maxLength": 4096,
-                                        "minLength": 1
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ]
-                                  },
-                                  "store_id": {
-                                    "type": "string",
-                                    "maxLength": 4096,
-                                    "minLength": 1,
-                                    "title": "Store Id"
-                                  },
-                                  "conversation_id": {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "maxLength": 4096,
-                                        "minLength": 1
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ],
-                                    "title": "Conversation Id"
-                                  }
-                                },
-                                "additionalProperties": false,
-                                "type": "object",
-                                "required": [
-                                  "store_id"
-                                ],
-                                "title": "MessageRef"
-                              },
-                              "version": {
-                                "properties": {
-                                  "modified_at": {
-                                    "title": "Modified At",
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "format": "date-time"
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ]
-                                  },
-                                  "subject": {
-                                    "type": "string",
-                                    "title": "Subject"
-                                  },
-                                  "unread": {
-                                    "type": "boolean",
-                                    "title": "Unread"
-                                  },
-                                  "folder_entry_id": {
-                                    "type": "string",
-                                    "maxLength": 4096,
-                                    "minLength": 1,
-                                    "title": "Folder Entry Id"
-                                  },
-                                  "flagged": {
-                                    "type": "boolean",
-                                    "title": "Flagged"
-                                  },
-                                  "importance": {
-                                    "type": "string",
-                                    "enum": [
-                                      "low",
-                                      "normal",
-                                      "high"
-                                    ],
-                                    "title": "Importance"
-                                  },
-                                  "version_digest": {
-                                    "type": "string",
-                                    "pattern": "^[0-9a-f]{64}$",
-                                    "title": "Version Digest"
-                                  },
-                                  "content_complete": {
-                                    "type": "boolean",
-                                    "title": "Content Complete"
-                                  }
-                                },
-                                "additionalProperties": false,
-                                "type": "object",
-                                "required": [
-                                  "version_digest",
-                                  "content_complete",
-                                  "subject",
-                                  "unread",
-                                  "folder_entry_id",
-                                  "flagged",
-                                  "importance"
-                                ],
-                                "title": "MessageVersion"
-                              }
-                            },
-                            "type": "object",
-                            "required": [
-                              "source",
-                              "version"
-                            ],
-                            "title": "ReplyToMail"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ],
-                        "title": "Mail"
-                      },
-                      "window_proof": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "pattern": "^[0-9a-f]{64}$"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ],
-                        "title": "Window Proof"
-                      }
-                    },
-                    "type": "object",
-                    "required": [
-                      "cards"
-                    ],
-                    "title": "View",
-                    "description": "The same structured view. Include the presentation's mail and window_proof fields\nwhen supplied to enable its verified mail controls."
+                  "window": {
+                    "type": "string",
+                    "title": "Window",
+                    "description": "Readable window label returned in the existing presentation."
                   }
                 },
                 "type": "object",
                 "required": [
-                  "view_id",
-                  "view"
+                  "window",
+                  "view_id"
                 ]
               }
             }

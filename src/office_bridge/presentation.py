@@ -85,6 +85,7 @@ class Presentation(BaseModel):
     html: str
     mail: MailActions | None = None
     window_proof: str | None = None
+    window: str | None = None
 
     def identity(self) -> str:
         content = {"view": self.view.model_dump(mode="json")}
@@ -357,6 +358,9 @@ def with_presentation(response: Response[T], **context: str) -> MessageResponse[
             elif isinstance(value, MessageDetail) and can_offer_reply(value):
                 display.mail = ReplyToMail(source=value.ref, version=value.version)
             display.window_proof = display.proof()
+            from office_bridge.window_view_cache import retain
+
+            retain(display)
         except Exception:
             # Rendering is advisory even after a successful, non-repeatable send.
             pass

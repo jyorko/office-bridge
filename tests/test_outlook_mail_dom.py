@@ -135,6 +135,19 @@ def test_open_and_read_require_the_exact_loaded_message_reference(page):
     page.locator('[data-convid="conversation-001"]').evaluate(
         "(element) => element.setAttribute('aria-selected', 'true')"
     )
+    assert (
+        run_script(page, {"phase": "read", "conversation_id": "conversation-001"})["state"]
+        == "waiting"
+    )
+    # Outlook updates selection before replacing the previous reading pane.
+    page.locator("[role=document]").evaluate(
+        "(element) => element.replaceWith(element.cloneNode(true))"
+    )
+    assert (
+        run_script(page, {"phase": "read", "conversation_id": "conversation-001"})["state"]
+        == "waiting"
+    )
+    page.wait_for_timeout(450)
     detail = run_script(page, {"phase": "read", "conversation_id": "conversation-001"})
     assert detail["state"] == "read"
     assert detail["item"]["entry_id"] == "conversation-001"
@@ -421,6 +434,88 @@ def test_create_draft_uses_resolved_recipient_and_returns_exact_draft_id(page):
     saved = run_script(page, {"phase": "close_saved_draft"})
     assert saved["state"] == "draft_saved"
     assert saved["draft"]["entry_id"] == "draft-001"
+
+
+def test_composer_probe_exposes_unresolved_recipient_controls_without_filling(page):
+    page.set_content(
+        """<div role="search">
+          <input role="combobox" aria-label="Search email" placeholder="Search">
+        </div>
+        <div role="group">
+          <input role="combobox">
+          <input role="combobox">
+        </div>
+        <div role="dialog" data-itemid="draft-001">
+          <input aria-label="Subject" value="Before">
+          <div contenteditable="true" aria-label="Message body">Before body</div>
+          <button>Send</button>
+          <span aria-label="Saved"></span>
+        </div>"""
+    )
+    inspected = run_script(
+        page, {"phase": "identity_probe", "open_details": False}
+    )
+    composer = inspected["composer"]
+    assert composer["state"] == "composer_ready"
+    assert composer["body_editor_count"] == 1
+    assert composer["subject_field_count"] == 1
+    assert composer["to_field_count"] == 0
+    assert composer["recipient_controls_outside_composer"] == 2
+    assert composer["recipient_controls_without_to_relation"] == 2
+    assert composer["saved"] is True
+    assert "Before body" not in json.dumps(inspected)
+
+    filled = run_script(
+        page,
+        {
+            "phase": "fill_draft",
+            "recipient_email": "synthetic@example.invalid",
+            "subject": "After",
+            "body_text": "After body",
+        },
+    )
+    assert filled["state"] == "recipient_field_unavailable"
+    assert page.locator('[aria-label="Subject"]').input_value() == "Before"
+    assert page.locator('[aria-label="Message body"]').inner_text() == "Before body"
+
+
+def test_close_saved_draft_checks_host_identity_before_clicking(page):
+    page.set_content(
+        """<div role="dialog" data-itemid="draft-001">
+          <input aria-label="Subject" value="Saved subject">
+          <div contenteditable="true" aria-label="Message body">Saved body</div>
+          <button>Send</button>
+          <button aria-label="Close" onclick="document.body.dataset.closed='true'"></button>
+          <span aria-label="Saved"></span>
+        </div>"""
+    )
+    result = run_script(
+        page,
+        {
+            "phase": "close_saved_draft",
+            "host_identity_verified": True,
+            "host_entry_id": "draft-002",
+        },
+    )
+    assert result["state"] == "draft_identity_unavailable"
+    assert page.locator("body").get_attribute("data-closed") is None
+
+
+def test_close_saved_draft_does_not_navigate_to_drafts_without_close_control(page):
+    page.set_content(
+        """<div role="treeitem" onclick="document.body.dataset.draftsOpened='true'">
+          Drafts
+        </div>
+        <div role="dialog" data-itemid="draft-001">
+          <input aria-label="Subject" value="Saved subject">
+          <div contenteditable="true" aria-label="Message body">Saved body</div>
+          <button>Send</button>
+          <span aria-label="Saved"></span>
+        </div>"""
+    )
+    result = run_script(page, {"phase": "close_saved_draft"})
+    assert result["state"] == "draft_not_saved"
+    assert page.locator("body").get_attribute("data-drafts-opened") is None
 
 
 def test_new_mail_never_replaces_an_existing_composer(page):

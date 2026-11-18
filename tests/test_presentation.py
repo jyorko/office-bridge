@@ -172,7 +172,9 @@ def test_unknown_outlook_receipt_status_is_never_displayed_as_success():
         )
 
 
-def test_browser_fallback_uses_existing_view_identity(monkeypatch):
+def test_browser_fallback_uses_existing_view_identity(monkeypatch, tmp_path):
+    monkeypatch.setenv("OFFICE_CANVAS_SIGNING_KEY", "fixture-window-key")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     view = presentation.View(
         cards=[{"kind": "mail", "heading": "Agenda", "body": "<Review> & notes"}]
     )
@@ -184,10 +186,22 @@ def test_browser_fallback_uses_existing_view_identity(monkeypatch):
         return {"view_id": presentation.view_id, "opened": True}
 
     monkeypatch.setattr(office_presentation_actions, "open_window", open_window)
-    receipt = office_presentation_actions.office_open_message_view(existing.view_id, view)
+    receipt = office_presentation_actions.office_open_message_view(
+        existing.window, existing.view_id
+    )
     assert receipt.opened
     assert seen[0].view_id == existing.view_id
     assert seen[0].html == existing.html
+
+
+def test_window_failure_exposes_only_a_known_explanation():
+    message = canvas_dispatch.failure_message(
+        {"error": "Desktop operation failed: draft_exists. Private path C:/private/mail"}
+    )
+    assert "open draft" in message
+    assert "private" not in message
+    assert "unconfirmed" not in message
+    assert "sensitive" not in canvas_dispatch.failure_message({"error": "sensitive text"})
 
 
 def test_window_dispatch_binds_source_version_view_and_instance(monkeypatch):

@@ -42,7 +42,9 @@ def test_outlook_operations_use_persistent_webview_session(
     assert desktop.invoke(operation, arguments) == {"accepted": True}
     assert len(calls) == 1
     assert calls[0][:2] == (web_operation, arguments)
-    assert calls[0][2] == (300 if operation == "download_attachments" else 90)
+    assert calls[0][2] == (
+        300 if operation == "download_attachments" else 35 if operation == "get_message" else 90
+    )
 
 
 @pytest.mark.parametrize(
@@ -75,6 +77,7 @@ def test_uncertain_outlook_mutations_are_never_retried(monkeypatch, operation):
 )
 def test_unaccepted_mailbox_writes_stay_disabled(monkeypatch, operation):
     monkeypatch.setattr(desktop.os, "name", "nt")
+    monkeypatch.setattr(desktop, "OUTLOOK_SUPPORTED", frozenset({"inbox_list"}))
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Unaccepted mailbox writes must not reach the host")

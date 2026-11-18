@@ -365,7 +365,7 @@ def check_ui(resource, displays):
         assert page.evaluate("window.calls") == [
             {
                 "name": "office_open_message_view",
-                "arguments": {"view_id": display["view_id"], "view": display["view"]},
+                "arguments": {"window": display["window"], "view_id": display["view_id"]},
             }
         ]
         for params, title in (

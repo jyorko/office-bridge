@@ -20,6 +20,24 @@
   const readTool = 'outlook_get_message',
     draftTool = 'outlook_create_reply_draft',
     windowTool = 'office_open_message_view';
+  const failures = new Map([
+    ['draft_exists', 'Outlook has an open draft. Close or save it before reading another email.'],
+    ['message_not_found', 'This email is no longer in the loaded inbox. Refresh the inbox and select it again.'],
+    ['message_identity_unavailable', 'Outlook has not supplied a verified identity for this email. Try Read email again.'],
+    ['message_identity_ambiguous', 'Outlook opened more than one matching message. Select one email and retry the read.'],
+    ['stale_message', 'This email changed. Read it again before creating a reply draft.'],
+    ['version_incomplete', 'Outlook has not supplied a complete message version. Read the email again.'],
+    ['mutation_outcome_unknown', 'Outlook did not confirm the change. Inspect Drafts before trying another write.'],
+    ['not_ready', 'Outlook is still loading the selected email. Try Read email again.'],
+    ['session_timeout', 'Outlook did not finish this operation within its time limit.']
+  ]);
+  function failureText(value) {
+    const text = typeof value === 'string' ? value : JSON.stringify(value || '');
+    for (const [code, message] of failures)
+      if (new RegExp(`(^|[^a-z_])${code}($|[^a-z_])`, 'i').test(text))
+        return `Office action failed. ${message}`;
+    return 'Office action failed. The host did not confirm the operation.';
+  }
   // Import the renderer's semantic markup only. A host result cannot add scripts,
   // URLs, styles, handlers or form submissions to the app's host bridge.
   const tags = new Set(
@@ -66,8 +84,10 @@
         else resolve(result);
       };
       const timer = setTimeout(
-        () => finish(new Error('The host timed out.')),
-        90000
+        () => finish(new Error(name === readTool
+          ? 'Reading this email timed out. Refresh the inbox and try Read email again.'
+          : 'The host timed out.')),
+        name === readTool ? 40000 : 90000
       );
       pending = { id, finish };
       try {
@@ -93,7 +113,7 @@
       }
     }
     if (params?.isError || value?.error)
-      throw new Error('Office action failed. See the original result.');
+      throw new Error(failureText(value?.error || text));
     return value;
   }
   function notice(title, detail) {
@@ -248,7 +268,7 @@
   function bind() {
     actions.replaceChildren();
     if (!current || !supportsTools) return;
-    const { view_id, view, mail, window_proof } = current;
+    const { view_id, view, mail, window: windowLabel } = current;
     const cards = [...main.querySelectorAll('.rows > article')];
     if (view.source === 'Outlook' && cards.length === view.cards.length) {
       cards.forEach((card, index) => {
@@ -269,15 +289,13 @@
         if (bar.childElementCount) card.append(bar);
       });
     }
-    if (!isolated)
+    if (!isolated && windowLabel)
       actions.append(
         button('Open in window', async () => {
           if (pending || editor) return;
           disableActions(true);
           try {
-            const args = { view_id, view };
-            if (mail && window_proof)
-              args.view = { ...view, mail, window_proof };
+            const args = { window: windowLabel, view_id };
             const receipt = valueOf(await call(windowTool, args));
             if (!receipt?.opened || receipt.view_id !== view_id)
               throw new Error('Window opening was not confirmed.');
@@ -366,7 +384,7 @@
     } else if (pending && data.id === pending.id) {
       pending.finish(
         data.error
-          ? new Error('The host could not complete the action.')
+          ? new Error(failureText(data.error?.message))
           : null,
         data.result
       );
