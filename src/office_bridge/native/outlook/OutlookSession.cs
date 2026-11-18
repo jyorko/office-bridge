@@ -2126,6 +2126,7 @@ public sealed class OutlookSession : ApplicationContext
         };
         detail["recipients"] = recipients;
         detail["body_text"] = body;
+        detail["body_html"] = truncated ? "" : TextField(result, "body_html");
         detail["body_truncated"] = truncated;
         if (exactNavigation)
         {
@@ -2469,9 +2470,22 @@ public sealed class OutlookSession : ApplicationContext
         }
         SetStage("operation_dispatch");
         if (operation == "outlook_internal_identity_probe")
+        {
+            if (BoolField(args, "attachments"))
+            {
+                var reference = RequireReference(Field(args, "message"));
+                Dictionary<string, object> record;
+                if (!observedMessages.TryGetValue(TextField(reference, "entry_id"), out record) ||
+                    TextField(record, "conversation_id") != TextField(reference, "conversation_id"))
+                    throw new InvalidOperationException("message_identity_unavailable");
+                return await ExecuteMailScript(new Dictionary<string, object> {
+                    { "phase", "attachment_probe" }, { "attachments", Field(record, "attachments") }
+                });
+            }
             return await ExecuteMailScript(new Dictionary<string, object> {
                 { "phase", "identity_probe" }, { "open_details", BoolField(args, "open_details") }
             });
+        }
         if (operation == "outlook_internal_response_probe")
         {
             string mode = TextField(args, "mode");

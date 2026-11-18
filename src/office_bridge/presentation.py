@@ -11,8 +11,9 @@ from typing import Annotated, Generic, Literal, TypeVar
 from uuid import uuid4
 
 from actions import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from office_bridge.mail_body import readable_plain_mail, safe_mail_html
 from office_bridge.outlook.models import InboxPage, MessageDetail, MessageRef, MessageVersion
 
 MESSAGE_URI = "ui://office-bridge/messages-v1.html"
@@ -26,10 +27,13 @@ class Card(BaseModel):
     heading: str
     detail: str = ""
     body: str = ""
+    body_html: str = ""
     unread: bool | None = None
     timestamp: str = ""
     facts: dict[str, str] = Field(default_factory=dict)
     body_truncated: bool = False
+
+    _safe_html = field_validator("body_html")(safe_mail_html)
 
 
 class View(BaseModel):
@@ -147,7 +151,12 @@ def _article(card: Card, *, listing: bool) -> str:
     facts = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in card.facts.items())
     content = f"<dl>{facts}</dl>" if facts else ""
     if card.body:
-        body = f'<div class="body">{escape(card.body)}</div>'
+        text = readable_plain_mail(card.body) if kind == "mail" else card.body
+        body = (
+            f'<div class="body mail-body">{card.body_html}</div>'
+            if kind == "mail" and card.body_html
+            else f'<div class="body">{escape(text)}</div>'
+        )
         if kind in {"chat", "receipt"} and (len(card.body) > 400 or card.body.count("\n") > 6):
             preview = "\n".join(card.body.splitlines()[:3])[:280].rstrip()
             body = (
@@ -237,6 +246,7 @@ def _mail(item: dict) -> Card:
         detail=sender.get("display_name") or sender.get("smtp_address") or "",
         timestamp=item["received_at"],
         body=item.get("body_text", ""),
+        body_html=item.get("body_html", ""),
         unread=item.get("unread"),
         facts=facts,
         body_truncated=item.get("body_truncated", False),
@@ -314,15 +324,25 @@ def message_view(result: dict, *, title: str = "Inbox", scope: str = "") -> View
     status = result.get("status")
     if status in ("observed", "already_observed") and "chat" in result:
         outcome = "Observed in Teams" if status == "observed" else "Previously observed in Teams"
+        mentions = [
+            mention["text"]
+            for mention in result.get("mentions", [])
+            if mention.get("entity_verified") is True
+        ]
         return View(
             source="Teams",
             title=outcome,
+            detail=""
+            if result.get("body_text")
+            else "Message text is unavailable in this receipt.",
             cards=[
                 Card(
                     kind="receipt",
                     heading=result["chat"]["title"],
                     detail="Conversation",
                     timestamp=result["time"],
+                    body=result.get("body_text", ""),
+                    facts={"Verified mentions": ", ".join(mentions)} if mentions else {},
                 )
             ],
         )

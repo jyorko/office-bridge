@@ -56,6 +56,38 @@ def set_inbox(page, *, selected=True, with_composer=False):
     )
 
 
+def test_attachment_probe_bounds_serialized_output_without_clicking(page):
+    controls = "".join(
+        f'<button aria-label="Preview guide.docx {index} {"界" * 150}">Preview</button>'
+        for index in range(20)
+    )
+    page.set_content(
+        f'<section><span title="guide.docx">guide.docx</span>{controls}</section>'
+        "<script>window.clicked = false;"
+        "document.addEventListener('click', () => window.clicked = true)</script>"
+    )
+    result = run_script(
+        page,
+        {
+            "phase": "attachment_probe",
+            "attachments": [
+                {"index": index, "filename": "guide.docx", "size_bytes": 1024}
+                for index in range(500)
+            ],
+        },
+    )
+    assert result["state"] == "attachment_probe"
+    assert result["total_count"] == 500
+    assert result["truncated"] is True
+    assert len(result["items"]) == 32
+    assert len(result["items"][0]["controls"]) == 20
+    assert all(
+        "guide.docx" not in control for item in result["items"] for control in item["controls"]
+    )
+    assert len(json.dumps(result, ensure_ascii=True).encode("utf-8")) < 1_048_576
+    assert page.evaluate("window.clicked") is False
+
+
 def test_scan_returns_exact_conversation_identity_and_bounded_metadata(page):
     set_inbox(page)
     result = run_script(page, {"phase": "scan", "step": "start"})
@@ -130,9 +162,14 @@ def test_reader_opens_the_current_viewport_before_advancing_it(page):
     page.locator('[data-convid="conversation-001"]').evaluate(
         "(row) => row.addEventListener('click', () => row.dataset.opened = 'true')"
     )
-    result = run_script(page, {
-        "phase": "scan", "step": "next", "open_conversation_id": "conversation-001",
-    })
+    result = run_script(
+        page,
+        {
+            "phase": "scan",
+            "step": "next",
+            "open_conversation_id": "conversation-001",
+        },
+    )
     assert result["state"] == "opening"
     assert page.locator('[data-convid="conversation-001"]').get_attribute("data-opened") == "true"
 
@@ -464,9 +501,7 @@ def test_composer_probe_exposes_unresolved_recipient_controls_without_filling(pa
           <span aria-label="Saved"></span>
         </div>"""
     )
-    inspected = run_script(
-        page, {"phase": "identity_probe", "open_details": False}
-    )
+    inspected = run_script(page, {"phase": "identity_probe", "open_details": False})
     composer = inspected["composer"]
     assert composer["state"] == "composer_ready"
     assert composer["body_editor_count"] == 1

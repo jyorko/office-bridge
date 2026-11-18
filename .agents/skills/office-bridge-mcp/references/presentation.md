@@ -2,6 +2,8 @@
 
 Present the result of the requested operation once. Inbox, search, single-message, chat-history and send tools return their original `result`/`error` envelope and can include `presentation` with `view`, `view_id` and script-free `html`. A rendered receipt describes the status the service observed. Outlook `submitted` confirms submission to Outlook. `already_submitted` refers to a previously recorded submission, even if an older receipt has no subject or body. Teams distinguishes `observed` from `already_observed`.
 
+New Teams send receipts retain the verified visible message text and show confirmed mention names. Older receipts without text say so; do not reconstruct them from a new request. Long receipts expand inline. **Open in window** appears only for views with mail actions, filtering or expandable reading content; receipts and empty results omit it.
+
 ## Choose the display route
 
 1. In T3, invoke the registered `desktop-office` Outlook tool directly. T3 uses its native MCP App attachment for that tool result. A shell or relay call returns data without attaching the app to the tool row. When T3 attaches the native view, presentation is complete. Do not render a second copy. Resource metadata alone does not prove an attachment.

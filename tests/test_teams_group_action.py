@@ -36,6 +36,7 @@ def test_observed_receipt_reuses_only_same_destination(tmp_path, monkeypatch):
     assert first.result.status == "observed"
     assert second.result.status == "already_observed"
     assert second.result.chat == CHAT
+    assert first.result.body_text == second.result.body_text == "test"
     assert calls == [
         (
             "teams_web_send_chat",
@@ -90,9 +91,10 @@ def test_markdown_send_passes_prepared_content_to_native(tmp_path, monkeypatch):
         }
 
     setup_send(tmp_path, monkeypatch, invoke)
-    actions.teams_web_send_chat(
+    result = actions.teams_web_send_chat(
         CHAT, "**hello** [guide](https://example.test)", "markdown-1", "markdown"
     )
+    assert result.result.body_text == "hello guide"
     operation, arguments = calls[0]
     assert operation == "teams_web_send_chat"
     assert arguments["body"] == "hello guide"

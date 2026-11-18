@@ -943,12 +943,23 @@
     }
     const messageId = identities.length === 1 ? identities[0] : "";
     const summary = row ? readRow(row) : null;
+    const displayBody = bodyRegion.cloneNode(true);
+    const sourceNodes = Array.from(bodyRegion.querySelectorAll("*"));
+    const displayNodes = Array.from(displayBody.querySelectorAll("*"));
+    for (let index = sourceNodes.length - 1; index >= 0; index--) {
+      const style = getComputedStyle(sourceNodes[index]);
+      if (style.display === "none" || style.visibility === "hidden" ||
+          sourceNodes[index].getAttribute("aria-hidden") === "true")
+        displayNodes[index].remove();
+    }
+    const bodyHTML = displayBody.innerHTML;
     return {
       state: "read",
       item: summary,
       dom_message_id: messageId,
       identity_candidate_count: identities.length,
       body_text: body.slice(0, 20001),
+      body_html: body.length <= 20000 && bodyHTML.length <= 200000 ? bodyHTML : "",
       body_binding_text: (bodyRegion.textContent || "").slice(0, 200000),
       body_truncated: body.length > 20000,
       recipients: recipientEntries(card),
@@ -1174,6 +1185,32 @@
     if (buttons.length !== 1) return { state: "attachment_unavailable" };
     buttons[0].click();
     return { state: "download_clicked" };
+  }
+
+  if (request.phase === "attachment_probe") {
+    const named = Array.isArray(request.attachments) ? request.attachments : [];
+    return { state: "attachment_probe", composer_present: hasComposer(),
+      total_count: named.length, truncated: named.length > 32,
+      items: named.slice(0, 32).map(item => {
+        const markers = Array.from(document.querySelectorAll('[aria-label],[title]'))
+          .filter(visible).filter(element => label(element).includes(item.filename));
+        const textMarkers = Array.from(document.querySelectorAll("span,div,button"))
+          .filter(visible).filter(element => (element.textContent || "").trim() === item.filename);
+        const controls = new Set();
+        for (const marker of [...markers, ...textMarkers]) {
+          let parent = marker;
+          for (let depth = 0; parent && parent !== document.body && depth < 4;
+               depth++, parent = parent.parentElement)
+            for (const control of visibleControls(parent)) {
+              const name = label(control);
+              if (/download|attachment|more|save|preview/i.test(name))
+                controls.add(name.split(item.filename).join("[file]").slice(0, 150));
+            }
+        }
+        return { index: item.index, size_bytes: item.size_bytes,
+          filename_marker_count: markers.length, filename_text_count: textMarkers.length,
+          controls: [...controls].slice(0, 20) };
+      }) };
   }
 
   if (request.phase === "identity_probe")

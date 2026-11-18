@@ -322,12 +322,12 @@ def send_chat(
         placeholder_order = validate_mention_placeholders(body, body_format, mention_keys)
     except BodyFormatError as error:
         raise TeamsError(str(error)) from None
+    expected_body = prepared.body
     if mentions.root:
         if placeholder_order != [mention.key for mention in mentions.root]:
             raise TeamsError("Mention plans must follow placeholder order in the message.")
         if body_format != "plain":
             raise TeamsError("Person mentions currently require a plain-text body.")
-        expected_body = prepared.body
         for mention in mentions.root:
             expected_body = expected_body.replace(
                 "{{mention:" + mention.key + "}}", mention.display_label
@@ -393,6 +393,7 @@ def send_chat(
             chat=chat,
             message_id=result["message_id"],
             time=result["time"],
+            body_text=expected_body,
             mentions=receipt_mentions,
         )
         with sqlite3.connect(path, timeout=3) as db:

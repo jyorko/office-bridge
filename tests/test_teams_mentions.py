@@ -221,6 +221,9 @@ def test_mentions_bind_same_request_id_and_cached_receipt(tmp_path, monkeypatch)
     assert first.result.status == "observed"
     assert second.result.status == "already_observed"
     assert second.result.mentions[0].recipient_email == "person@example.invalid"
+    assert first.result.body_text == second.result.body_text == "Hi Example Person"
+    assert second.presentation.view.cards[0].body == "Hi Example Person"
+    assert second.presentation.view.cards[0].facts == {"Verified mentions": "Example Person"}
     assert [operation for operation, _ in calls].count("teams_web_send_chat") == 1
     send_arguments = next(args for operation, args in calls if operation == "teams_web_send_chat")
     assert send_arguments["mentions"] == [
@@ -250,4 +253,6 @@ def test_old_receipt_stays_unchanged_and_validates_without_mentions():
     )
     receipt = GroupReceipt.model_validate_json(receipt_json)
     assert receipt.mentions == []
+    assert receipt.body_text == ""
+    assert "body_text" not in receipt.model_dump_json()
     assert "mentions" not in receipt.model_dump_json()

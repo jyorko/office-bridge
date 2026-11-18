@@ -18,3 +18,7 @@ Before merging:
 Mailbox verification uses read-only operations. Sending or archiving needs separate explicit authorization.
 
 Individual reads no longer scan the entire inbox before locating their reference. The pipe timeout is 35 seconds; the selected-pane wait is bounded to eight seconds.
+
+Email presentation preserves bounded, sanitized paragraphs, lists and tables. It removes scripts, remote resources, inline styles and empty Word paragraphs. The original plain-text body and message-version digest remain the mutation contract.
+
+Attachment downloads are not yet live-verified for every supported message layout. Message text and attachment controls can become ready separately. The internal identity probe accepts `attachments: true` with an observed exact message reference and reports metadata sizes, matching filename counts and nearby control labels without clicking or downloading. It reports at most 32 attachments, with an explicit total count and truncation flag. A successful message read alone does not prove attachment readiness.

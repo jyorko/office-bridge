@@ -429,6 +429,44 @@
         white-space: pre-wrap;
         line-height: 1.65;
       }
+      .mail-body {
+        white-space: normal;
+        max-width: 85ch;
+        overflow-x: auto;
+      }
+      .mail-body p { margin: 0 0 0.8em; }
+      .mail-body p:last-child { margin-bottom: 0; }
+      .mail-body ul, .mail-body ol { margin: 0.7em 0; padding-left: 1.6em; }
+      .mail-body li { margin: 0.25em 0; }
+      .mail-body table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1em 0;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .mail-body td, .mail-body th {
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        min-width: 6em;
+      }
+      .mail-body th, .mail-body thead {
+        background: color-mix(in srgb, var(--blue) 8%, var(--sheet));
+        font-weight: 650;
+      }
+      .mail-body td p, .mail-body th p { margin: 0 0 0.4em; }
+      .mail-body blockquote { margin: 1em 0; padding-left: 1em; border-left: 3px solid var(--line); }
+      .mail-body h1, .mail-body h2, .mail-body h3, .mail-body h4 {
+        margin: 1em 0 0.4em;
+        font-size: 1.1em;
+        letter-spacing: normal;
+      }
+      .mail-body pre { white-space: pre-wrap; }
+      .mast.outlook, .mast.receipt { min-height: 90px; padding-block: 16px; }
+      .mast.outlook .glyph, .mast.receipt .glyph { flex-basis: 72px; height: 60px; }
+      .mast.outlook h1, .mast.receipt h1 { font-size: 27px; }
       .preview {
         color: var(--sub);
       }
