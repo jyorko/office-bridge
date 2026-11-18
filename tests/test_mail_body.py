@@ -26,6 +26,19 @@ def test_mail_never_imports_scripts_remote_resources_or_interactive_controls():
     assert safe_mail_html("<p>" + "x" * 200_001) == ""
 
 
+def test_mail_keeps_only_absolute_http_links_and_discards_unsafe_destinations():
+    html = safe_mail_html(
+        '<p><a href="https://example.invalid/review?a=1&amp;b=2">Review</a> '
+        '<a href="mailto:person@example.invalid">email</a> '
+        '<a href="//example.invalid/path">relative</a> '
+        '<a href="https://user:pass@example.invalid/">credentialed</a></p>'
+    )
+    assert html == (
+        '<p><a href="https://example.invalid/review?a=1&amp;b=2">Review</a> '
+        "email relative credentialed</p>"
+    )
+
+
 def test_plain_mail_spacing_is_display_only_and_rich_markup_reaches_renderer():
     body = "First paragraph\n \n\n\n\nSecond paragraph"
     card = Card(

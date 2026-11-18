@@ -3,14 +3,30 @@
 import re
 from html import escape
 from html.parser import HTMLParser
+from urllib.parse import urlsplit
 
 TAGS = frozenset(
-    "p br strong b em i u s ul ol li blockquote table thead tbody tfoot tr td th "
+    "p br strong b em i u s ul ol li blockquote table thead tbody tfoot tr td th a "
     "pre code h1 h2 h3 h4 h5 h6 hr".split()
 )
 OMIT = frozenset("script style head title template iframe object svg math form button".split())
 VOID = frozenset({"br", "hr"})
 MAX_HTML = 200_000
+
+
+def _safe_http_url(value: str | None) -> str | None:
+    if not value or any(ord(char) < 32 for char in value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return None
+        if parsed.username is not None or parsed.password is not None:
+            return None
+        parsed.port
+    except ValueError:
+        return None
+    return value
 
 
 class _MailHTML(HTMLParser):
@@ -31,7 +47,12 @@ class _MailHTML(HTMLParser):
         if tag not in TAGS:
             return
         spans = ""
-        if tag in {"td", "th"}:
+        if tag == "a":
+            href = _safe_http_url(dict(attrs).get("href"))
+            if not href:
+                return
+            spans = f' href="{escape(href, quote=True)}"'
+        elif tag in {"td", "th"}:
             for key, value in attrs:
                 if (
                     key in {"colspan", "rowspan"}

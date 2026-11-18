@@ -59,6 +59,34 @@ def test_old_teams_receipt_does_not_backfill_text_from_a_new_request(monkeypatch
     assert "Do not invent this text" not in result.presentation.html
 
 
+def test_teams_receipt_keeps_full_text_and_marks_only_unique_verified_mentions():
+    body = "Alex Morgan: Please review this. Alex Morgan is the owner."
+    card = presentation.Card(
+        kind="receipt",
+        heading="Project review",
+        body=body,
+        facts={"Verified mentions": "Alex Morgan, Mira Chen"},
+    )
+    display = presentation.present(
+        presentation.View(source="Teams", title="Observed in Teams", cards=[card])
+    )
+    assert card.body == body
+    assert 'class="preview"' not in display.html
+    assert "<details" not in display.html
+    assert display.html.count('class="verified-mention"') == 2
+    receipt_text = display.html.partition('receipt-body">')[2].partition("</div>")[0]
+    assert "<span class=" not in receipt_text
+    assert body in display.html
+
+    card.body = "Please ask Alex Morgan to review."
+    display = presentation.present(
+        presentation.View(source="Teams", title="Observed in Teams", cards=[card])
+    )
+    assert display.html.count('class="verified-mention"') == 3
+    assert "Observed in Teams" in display.html
+    assert "Project review" in display.html
+
+
 @pytest.mark.parametrize("failure", [OSError("missing asset"), RuntimeError("render failed")])
 def test_display_failure_keeps_completed_outlook_send(monkeypatch, failure):
     receipt = SendReceipt(

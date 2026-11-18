@@ -12,6 +12,7 @@
   const actions = document.getElementById('window-action');
   const status = document.getElementById('action-status');
   let supportsTools = false,
+    supportsOpenLinks = false,
     current,
     editor,
     pending,
@@ -41,15 +42,46 @@
   // Import the renderer's semantic markup only. A host result cannot add scripts,
   // URLs, styles, handlers or form submissions to the app's host bridge.
   const tags = new Set(
-    ('HEADER DIV P H1 H2 H3 H4 H5 H6 I SPAN SECTION ARTICLE LABEL INPUT DETAILS SUMMARY DL DT DD ' +
+    ('HEADER DIV P H1 H2 H3 H4 H5 H6 I SPAN SECTION ARTICLE LABEL INPUT DETAILS SUMMARY DL DT DD A ' +
      'BR STRONG B EM U S UL OL LI BLOCKQUOTE TABLE THEAD TBODY TFOOT TR TD TH PRE CODE HR').split(
       ' '
     )
   );
+  function safeLink(value) {
+    try {
+      const url = new URL(value);
+      return ['http:', 'https:'].includes(url.protocol) &&
+        !url.username &&
+        !url.password
+        ? url.href
+        : '';
+    } catch {
+      return '';
+    }
+  }
+  const linkRequests = new Set();
   function copyMarkup(node) {
     if (node.nodeType === Node.TEXT_NODE)
       return document.createTextNode(node.data);
     if (!tags.has(node.tagName)) return document.createDocumentFragment();
+    if (node.tagName === 'A') {
+      const url = safeLink(node.getAttribute('href') || '');
+      const label = document.createElement(supportsOpenLinks && url ? 'a' : 'span');
+      label.className = supportsOpenLinks && url ? '' : 'link-text';
+      label.append(...Array.from(node.childNodes, copyMarkup));
+      if (supportsOpenLinks && url) {
+        label.href = url;
+        label.onclick = (event) => {
+          event.preventDefault();
+          const id = ++sequence;
+          linkRequests.add(id);
+          post({ jsonrpc: '2.0', id, method: 'ui/open-link', params: { url } });
+        };
+      } else if (url && label.textContent.trim() !== url) {
+        label.append(document.createTextNode(` (${url})`));
+      }
+      return label;
+    }
     const copy = document.createElement(node.localName);
     copy.className = node.className;
     for (const attr of ['aria-label', 'aria-hidden', 'title', 'data-unread']) {
@@ -382,6 +414,7 @@
     if (data.id === 1 && data.result && !initialized) {
       initialized = true;
       supportsTools = !!data.result.hostCapabilities?.serverTools;
+      supportsOpenLinks = !!data.result.hostCapabilities?.openLinks;
       theme(data.result.hostContext);
       notify('ui/notifications/initialized');
       if (!isolated)
@@ -390,6 +423,8 @@
             height: Math.ceil(document.body.getBoundingClientRect().height)
           })
         ).observe(document.body);
+    } else if (linkRequests.has(data.id)) {
+      linkRequests.delete(data.id);
     } else if (pending && data.id === pending.id) {
       pending.finish(
         data.error
