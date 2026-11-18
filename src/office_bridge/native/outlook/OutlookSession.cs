@@ -99,6 +99,8 @@ public sealed class OutlookSession : ApplicationContext
     readonly Dictionary<string, Dictionary<string, object>> observedMessages =
         new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
     readonly HashSet<string> createdDraftIds = new HashSet<string>(StringComparer.Ordinal);
+    readonly Dictionary<string, string> webMessageIds =
+        new Dictionary<string, string>(StringComparer.Ordinal);
     readonly HashSet<string> movedItemIds = new HashSet<string>(StringComparer.Ordinal);
     CoreWebView2DownloadOperation pendingDownload = null;
     string pendingDownloadPath = "";
@@ -2009,13 +2011,16 @@ public sealed class OutlookSession : ApplicationContext
             throw new InvalidOperationException("invalid_request");
         if (String.IsNullOrWhiteSpace(conversation))
             throw new InvalidOperationException("message_not_found");
-        bool exactNavigation = !String.IsNullOrEmpty(requestedMessage);
+        string webMessage = IdentityText(Field(args, "web_message_id"));
+        if (webMessage.Length == 0 && requestedMessage.Length > 0)
+            webMessageIds.TryGetValue(requestedMessage, out webMessage);
+        bool exactNavigation = !String.IsNullOrEmpty(webMessage) && requestedMessage.Length > 0;
         if (exactNavigation)
         {
             var current = new Uri(controller.CoreWebView2.Source);
             observedConversations.Remove(conversation);
             controller.CoreWebView2.Navigate("https://" + current.Host +
-                "/mail/id/" + Uri.EscapeDataString(requestedMessage));
+                "/mail/id/" + Uri.EscapeDataString(webMessage));
             await Task.Delay(500);
         }
         else await OpenConversation(conversation, folder);
@@ -2122,6 +2127,11 @@ public sealed class OutlookSession : ApplicationContext
         detail["recipients"] = recipients;
         detail["body_text"] = body;
         detail["body_truncated"] = truncated;
+        if (exactNavigation)
+        {
+            if (webMessageIds.Count >= 256) webMessageIds.Clear();
+            webMessageIds[requestedMessage] = webMessage;
+        }
         var capability = await ExecuteMailScript(new Dictionary<string, object> {
             { "phase", "reply_capability" }, { "conversation_id", conversation }
         });
@@ -2330,7 +2340,8 @@ public sealed class OutlookSession : ApplicationContext
         string root = Path.Combine(appRoot, "outlook-web-attachments");
         RequirePlainDirectory(appRoot);
         RequirePlainDirectory(root);
-        string folder = Path.Combine(root, DigestValues(TextField(reference, "entry_id"), storeIdentity));
+        string folder = Path.Combine(root,
+            DigestValues(TextField(reference, "entry_id"), storeIdentity).Substring(0, 32));
         RequirePlainDirectory(folder);
         var result = new List<Dictionary<string, object>>();
         long savedTotal = 0;
@@ -2380,7 +2391,16 @@ public sealed class OutlookSession : ApplicationContext
                 using (var sha = System.Security.Cryptography.SHA256.Create())
                 using (var stream = File.OpenRead(temp))
                     hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
-                string destination = Path.Combine(folder, hash + "_" + SafeAttachmentName(name, index));
+                string safeName = SafeAttachmentName(name, index);
+                int nameBudget = 240 - folder.Length - hash.Length - 2;
+                if (nameBudget < 24) throw new InvalidOperationException("attachment_unavailable");
+                if (safeName.Length > nameBudget)
+                {
+                    string extension = Path.GetExtension(safeName);
+                    if (extension.Length > 20) extension = "";
+                    safeName = safeName.Substring(0, nameBudget - extension.Length) + extension;
+                }
+                string destination = Path.Combine(folder, hash + "_" + safeName);
                 if (File.Exists(destination))
                 {
                     if ((File.GetAttributes(destination) & FileAttributes.ReparsePoint) != 0)
