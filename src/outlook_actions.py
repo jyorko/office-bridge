@@ -20,11 +20,15 @@ from office_bridge.outlook.models import (
     ReplyDraft,
     SendReceipt,
 )
+from office_bridge.outlook.service import send_draft as submit_outlook_draft
 
 
 @tool(read_only_hint=True, open_world_hint=False)
 def outlook_inbox_list(limit: Limit = 20, unread_only: bool = False) -> Response[InboxPage]:
-    """List the newest inbox mail within a bounded scan of 500 items.
+    """List recent inbox conversations within a bounded scan of 500 messages.
+
+    The returned reference is a conversation identity. Individual reads fail
+    closed until the host can verify an exact message identity.
 
     Args:
         limit: Maximum results, from 1 to 50.
@@ -35,10 +39,14 @@ def outlook_inbox_list(limit: Limit = 20, unread_only: bool = False) -> Response
 
 @tool(read_only_hint=True, open_world_hint=False)
 def outlook_get_message(message: MessageRef) -> Response[MessageDetail]:
-    """Read mail with body capped at 20000 characters.
+    """Read one exact message with its body capped at 20000 characters.
+
+    This operation fails closed when Outlook does not expose an exact message
+    identity. Draft, reply, attachment, send, and archive actions are unavailable.
 
     Args:
-        message: Entry and store identity returned by a mail listing.
+        message: A conversation reference from a list, or an exact message
+            reference returned by an earlier read.
     """
     return desktop.run("get_message", MessageDetail, message=message)
 
@@ -64,9 +72,9 @@ def outlook_create_reply_draft(
     """Save an attachment-free, plain-text reply or reply-all draft. Never sends.
 
     Args:
-        source: Entry and store identity of the source mail.
+        source: Exact message reference returned by outlook_get_message.
         body_text: Complete plain-text reply body, at most 20000 characters.
-        expected_source: Unchanged version returned by the last mail read.
+        expected_source: Content/version digest returned by the last message read.
         reply_all: Include the source message's other recipients when true.
     """
     return desktop.run(
@@ -89,7 +97,11 @@ def outlook_send_draft(
         draft: Entry and store identity returned when creating the draft.
         expected_digest: Returned digest of body, subject, recipients, and sending account.
     """
-    return desktop.run("send_draft", SendReceipt, draft=draft, expected_digest=expected_digest)
+    try:
+        receipt = submit_outlook_draft(draft, expected_digest)
+        return Response(result=receipt)
+    except desktop.BridgeError as error:
+        raise ActionError(f"Outlook send failed: {error.code}.") from None
 
 
 @tool(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
@@ -121,27 +133,34 @@ def outlook_archive(
     """Move unchanged inbox mail to its existing Archive folder and return its new identity.
 
     Args:
-        message: Entry and store identity of the inbox mail.
-        expected_source: Unchanged version returned by the last mail read.
+        message: Exact message reference returned by outlook_get_message.
+        expected_source: Unchanged content/version digest returned by the last read.
     """
     return desktop.run("archive", ArchiveReceipt, message=message, expected_source=expected_source)
 
 
 @tool(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 def outlook_download_attachments(
-    entry_id: Identifier, store_id: Identifier, pdf_only: bool = False
+    entry_id: Identifier,
+    store_id: Identifier,
+    pdf_only: bool = False,
+    conversation_id: Identifier | None = None,
 ) -> Response[AttachmentDownloads]:
     """Save mail attachments locally without opening them, up to 25 files and 50 MiB.
 
     Args:
-        entry_id: Exact message entry identity returned by an Outlook mail listing.
-        store_id: Exact store identity returned with the message entry identity.
+        entry_id: Exact message identity returned by outlook_get_message.
+        store_id: Exact store identity returned with the message.
         pdf_only: Save only PDF attachments, excluding signature images and other files.
+        conversation_id: Conversation identity returned with the message, when available.
     """
-    reference = MessageRef(entry_id=entry_id, store_id=store_id)
+    reference = MessageRef(
+        entry_id=entry_id, store_id=store_id, conversation_id=conversation_id
+    )
     try:
         result = desktop.invoke(
-            "download_attachments", {**reference.model_dump(), "pdf_only": pdf_only}
+            "download_attachments",
+            {**reference.model_dump(mode="json", exclude_none=True), "pdf_only": pdf_only},
         )
         return Response(result=AttachmentDownloads.model_validate(result))
     except desktop.BridgeError as error:

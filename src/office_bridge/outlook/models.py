@@ -3,18 +3,27 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from office_bridge.models import Identifier, Model
 
 
 class MessageRef(Model):
-    entry_id: Identifier
+    entry_id: Identifier | None = None
+    conversation_id: Identifier | None = None
     store_id: Identifier
+
+    @model_validator(mode="after")
+    def require_identity(self):
+        if self.entry_id is None and self.conversation_id is None:
+            raise ValueError("A message or conversation identity is required.")
+        return self
 
 
 class MessageVersion(Model):
-    modified_at: datetime
+    modified_at: datetime | None = None
+    version_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    content_complete: bool
     subject: str
     unread: bool
     folder_entry_id: Identifier
@@ -79,8 +88,13 @@ class MailDraft(Model):
 
 class SendReceipt(Model):
     draft: MessageRef
-    status: Literal["submitted"]
+    status: Literal["submitted", "already_submitted"]
     submitted_at: datetime
+    subject: Annotated[str, Field(max_length=250)] | None = None
+    body_text: Annotated[str, Field(max_length=20000)] | None = None
+    body_truncated: bool | None = None
+    account_verified: bool | None = None
+    sent_items_verified: bool | None = None
 
 
 class ArchiveReceipt(Model):
