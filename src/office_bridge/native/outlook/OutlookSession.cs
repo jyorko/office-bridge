@@ -78,6 +78,10 @@ public sealed class OutlookSession : ApplicationContext
     int responseProbeChangeKeys;
     int responseProbeBodies;
     bool initializing;
+    // Bounded identity metadata from Outlook's own conversation responses. No bodies.
+    readonly Dictionary<string, List<Dictionary<string, object>>> observedConversations =
+        new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.Ordinal);
+    readonly Queue<string> observedOrder = new Queue<string>();
 
     static readonly HashSet<string> SafeErrors = new HashSet<string>(StringComparer.Ordinal) {
         "invalid_request", "not_ready", "needs_interactive_login", "access_blocked",
@@ -502,20 +506,137 @@ public sealed class OutlookSession : ApplicationContext
         }
     }
 
+    static string IdentityText(object raw)
+    {
+        var map = raw as Dictionary<string, object>;
+        string value = map == null ? raw as string : map.ContainsKey("Id") ? map["Id"] as string : null;
+        if (String.IsNullOrWhiteSpace(value) || value.Length > 4096 ||
+            value.Any(character => Char.IsControl(character))) return "";
+        return value;
+    }
+
+    static List<Dictionary<string, object>> ObservedRecipients(
+        Dictionary<string, object> item, ref bool complete)
+    {
+        var recipients = new List<Dictionary<string, object>>();
+        string[] fields = { "ToRecipients", "CcRecipients" };
+        bool present = false;
+        for (int index = 0; index < fields.Length; index++)
+        {
+            if (!item.ContainsKey(fields[index]) || item[fields[index]] == null) continue;
+            var values = item[fields[index]] as System.Collections.IList;
+            if (values == null || values.Count > 500) { complete = false; continue; }
+            present = true;
+            foreach (object raw in values)
+            {
+                var entry = raw as Dictionary<string, object>;
+                var mailbox = entry != null && entry.ContainsKey("Mailbox")
+                    ? entry["Mailbox"] as Dictionary<string, object> : entry;
+                string address = mailbox == null ? "" :
+                    (TextField(mailbox, "EmailAddress") ?? "").Trim().ToLowerInvariant();
+                if (!Regex.IsMatch(address, "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$") ||
+                    address.Length > 254)
+                {
+                    complete = false;
+                    continue;
+                }
+                string name = TextField(mailbox, "Name").Trim();
+                if (name.Length == 0 || name.Length > 500) name = address;
+                recipients.Add(new Dictionary<string, object> {
+                    { "display_name", name }, { "smtp_address", address },
+                    { "recipient_type", index + 1 }
+                });
+            }
+        }
+        if (!present) complete = false;
+        return recipients;
+    }
+
+    // Reduce one parsed service response to per-conversation identity records.
+    static Dictionary<string, List<Dictionary<string, object>>> ObservedItems(object root)
+    {
+        var found = new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.Ordinal);
+        var pending = new Stack<object>();
+        pending.Push(root);
+        int visited = 0, records = 0;
+        while (pending.Count > 0 && visited++ < 20000 && records < 200)
+        {
+            object node = pending.Pop();
+            var map = node as Dictionary<string, object>;
+            if (map == null)
+            {
+                var list = node as System.Collections.IList;
+                if (list != null) foreach (object child in list)
+                    if (child is Dictionary<string, object> || child is System.Collections.IList)
+                        pending.Push(child);
+                continue;
+            }
+            foreach (var field in map)
+                if (field.Value is Dictionary<string, object> ||
+                    field.Value is System.Collections.IList) pending.Push(field.Value);
+            if (!map.ContainsKey("ItemId") || !map.ContainsKey("ConversationId")) continue;
+            var identity = map["ItemId"] as Dictionary<string, object>;
+            string entry = IdentityText(identity);
+            string changeKey = identity == null || !identity.ContainsKey("ChangeKey")
+                ? "" : IdentityText(identity["ChangeKey"]);
+            string conversation = IdentityText(map["ConversationId"]);
+            if (entry.Length == 0 || changeKey.Length == 0 || conversation.Length == 0) continue;
+            bool complete = map.ContainsKey("HasAttachments") && map["HasAttachments"] is bool &&
+                map.ContainsKey("IsDraft") && map["IsDraft"] is bool;
+            var recipients = ObservedRecipients(map, ref complete);
+            var record = new Dictionary<string, object> {
+                { "entry_id", entry }, { "change_key", changeKey },
+                { "conversation_id", conversation },
+                { "is_draft", map.ContainsKey("IsDraft") && map["IsDraft"] is bool &&
+                    (bool)map["IsDraft"] },
+                { "has_attachments", map.ContainsKey("HasAttachments") &&
+                    map["HasAttachments"] is bool && (bool)map["HasAttachments"] },
+                { "recipients", recipients }, { "complete", complete }
+            };
+            List<Dictionary<string, object>> items;
+            if (!found.TryGetValue(conversation, out items))
+                found[conversation] = items = new List<Dictionary<string, object>>();
+            if (!items.Any(other => TextField(other, "entry_id") == entry &&
+                    TextField(other, "change_key") == changeKey))
+            {
+                items.Add(record);
+                records++;
+            }
+        }
+        return found;
+    }
+
+    void RememberObserved(Dictionary<string, List<Dictionary<string, object>>> found)
+    {
+        foreach (var pair in found)
+        {
+            if (!observedConversations.ContainsKey(pair.Key))
+            {
+                while (observedOrder.Count >= 64)
+                    observedConversations.Remove(observedOrder.Dequeue());
+                observedOrder.Enqueue(pair.Key);
+            }
+            observedConversations[pair.Key] = pair.Value;
+        }
+    }
+
     async Task ObserveMailResponse(CoreWebView2WebResourceResponseReceivedEventArgs e)
     {
-        if (DateTime.UtcNow >= responseProbeUntil || responseProbeBusy ||
-            responseProbeMatched >= 8) return;
+        bool probing = DateTime.UtcNow < responseProbeUntil && !responseProbeBusy &&
+            responseProbeMatched < 8;
         try
         {
             string action = MailResponseAction(e.Request.Uri);
             if (String.IsNullOrEmpty(action) || e.Response.StatusCode != 200) return;
-            responseProbeBusy = true;
-            responseProbeMatched++;
-            responseProbeGetConversationItems++;
+            if (probing)
+            {
+                responseProbeBusy = true;
+                responseProbeMatched++;
+                responseProbeGetConversationItems++;
+            }
             using (Stream stream = await e.Response.GetContentAsync())
             {
-                if (stream == null) { responseProbeEmpty++; return; }
+                if (stream == null) { if (probing) responseProbeEmpty++; return; }
                 using (var memory = new MemoryStream())
                 {
                     byte[] buffer = new byte[16384];
@@ -524,18 +645,23 @@ public sealed class OutlookSession : ApplicationContext
                     {
                         if (memory.Length + read > MaxFrame)
                         {
-                            responseProbeOversize++;
+                            if (probing) responseProbeOversize++;
                             return;
                         }
                         memory.Write(buffer, 0, read);
                     }
-                    if (memory.Length == 0) { responseProbeEmpty++; return; }
+                    if (memory.Length == 0) { if (probing) responseProbeEmpty++; return; }
                     var parser = new JavaScriptSerializer {
                         MaxJsonLength = MaxFrame, RecursionLimit = 64
                     };
                     object parsed = parser.DeserializeObject(
                         Encoding.UTF8.GetString(memory.ToArray()));
-                    if (parsed != null)
+                    if (parsed == null) return;
+                    var found = ObservedItems(parsed);
+                    if (host.InvokeRequired)
+                        host.BeginInvoke(new Action(() => RememberObserved(found)));
+                    else RememberObserved(found);
+                    if (probing)
                     {
                         responseProbeJson++;
                         CountResponseShape(parsed);
@@ -543,8 +669,8 @@ public sealed class OutlookSession : ApplicationContext
                 }
             }
         }
-        catch (Exception) { responseProbeReadErrors++; }
-        finally { responseProbeBusy = false; }
+        catch (Exception) { if (probing) responseProbeReadErrors++; }
+        finally { if (probing) responseProbeBusy = false; }
     }
 
     Dictionary<string, object> ResponseProbeStatus()
@@ -1292,47 +1418,63 @@ public sealed class OutlookSession : ApplicationContext
                 { "phase", "read" }, { "conversation_id", conversation },
                 { "message_id", String.IsNullOrEmpty(requestedMessage) ? null : requestedMessage }
             });
-            if (TextField(result, "state") == "read") break;
-            if (TextField(result, "state") == "message_identity_unavailable" ||
-                TextField(result, "state") == "message_identity_ambiguous")
-                throw new InvalidOperationException(TextField(result, "state"));
-            if (TextField(result, "state") != "waiting")
-                throw new InvalidOperationException(TextField(result, "state"));
+            string state = TextField(result, "state");
+            if (state == "read" && observedConversations.ContainsKey(conversation)) break;
+            if (state == "message_identity_ambiguous")
+                throw new InvalidOperationException(state);
+            if (state != "waiting" && state != "read")
+                throw new InvalidOperationException(state);
             await Task.Delay(200);
         }
         if (result == null || TextField(result, "state") != "read")
             throw new InvalidOperationException("not_ready");
         SetStage("message_identity_verify");
         await RequireAuthenticated();
-        if (!BoolField(result, "identity_authoritatively_verified"))
+        // The exact message is the single non-draft item Outlook itself returned for
+        // the selected conversation. Anything else stops without a guess.
+        List<Dictionary<string, object>> observed;
+        if (!observedConversations.TryGetValue(conversation, out observed))
             throw new InvalidOperationException("message_identity_unavailable");
+        var exact = observed.Where(item => !BoolField(item, "is_draft")).ToList();
+        if (exact.Count != 1)
+            throw new InvalidOperationException(exact.Count == 0
+                ? "message_identity_unavailable" : "message_identity_ambiguous");
+        var record = exact[0];
         var messageRow = Field(result, "item") as Dictionary<string, object>;
-        string messageId = TextField(result, "message_id");
+        string messageId = TextField(record, "entry_id");
+        string domMessage = TextField(result, "dom_message_id");
+        if (!String.IsNullOrEmpty(domMessage) && domMessage != messageId)
+            throw new InvalidOperationException("message_identity_ambiguous");
         if (messageRow == null || ConversationId(messageRow) != conversation ||
-            String.IsNullOrWhiteSpace(messageId) ||
             !String.IsNullOrEmpty(requestedMessage) && messageId != requestedMessage)
             throw new InvalidOperationException("stale_message");
         SetStage("message_version_build");
         var detail = Summary(messageRow);
         string body = TextField(result, "body_text");
-        var recipients = Field(result, "recipients") as System.Collections.IList;
+        var recipients = Field(record, "recipients") as List<Dictionary<string, object>>;
+        bool truncated = BoolField(result, "body_truncated") || body.Length > 20000;
         if (body.Length > 20000) body = body.Substring(0, 20000);
+        string addresses = String.Join("\n", recipients.Select(recipient =>
+            Convert.ToString(recipient["recipient_type"]) + ":" +
+            Convert.ToString(recipient["smtp_address"])).ToArray());
         var version = Field(detail, "version") as Dictionary<string, object>;
         version["version_digest"] = DigestValues(conversation, messageId,
+            TextField(record, "change_key"),
             TextField(detail, "subject"), TextField(Field(detail, "sender") as Dictionary<string, object>,
                 "display_name"), body, TextField(detail, "received_at"),
             BoolField(detail, "unread").ToString(), BoolField(detail, "flagged").ToString(),
-            TextField(detail, "importance"));
-        // The current DOM digest does not yet bind verified recipients or every
-        // attachment, so it is not a mutation-safe content version.
-        version["content_complete"] = false;
+            TextField(detail, "importance"), addresses,
+            BoolField(record, "has_attachments").ToString());
+        // Complete only when Outlook's response supplied the item version, every
+        // recipient, and the attachment and draft flags, and the body is whole.
+        version["content_complete"] = BoolField(record, "complete") && !truncated;
         detail["ref"] = new Dictionary<string, object> {
             { "entry_id", messageId }, { "conversation_id", conversation },
             { "store_id", storeIdentity }
         };
-        detail["recipients"] = recipients ?? new System.Collections.ArrayList();
+        detail["recipients"] = recipients;
         detail["body_text"] = body;
-        detail["body_truncated"] = BoolField(result, "body_truncated");
+        detail["body_truncated"] = truncated;
         return detail;
     }
 

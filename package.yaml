@@ -26,7 +26,7 @@ dev-tasks:
   test-edit: python -m pytest tests/test_teams_web_dom.py tests/test_teams_message_edit.py -q
   test-evidence: python -m pytest tests/test_evidence.py -q
   test-copilot: python -m pytest tests/test_copilot.py tests/test_copilot_dom.py -q
-  test-outlook: python -m pytest tests/test_outlook_account_surface.py tests/test_outlook_mail_dom.py tests/test_outlook_models.py tests/test_outlook_response_probe.py tests/test_outlook_send_ledger.py tests/test_outlook_web_routing.py -q
+  test-outlook: python -m pytest tests/test_outlook_account_surface.py tests/test_outlook_mail_dom.py tests/test_outlook_models.py tests/test_outlook_observed_items.py tests/test_outlook_response_probe.py tests/test_outlook_send_ledger.py tests/test_outlook_web_routing.py -q
   prepare: python scripts/prepare_state.py
   prepare-dev: python scripts/prepare_state.py --dev
   serve: python scripts/run_server.py

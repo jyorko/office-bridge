@@ -699,21 +699,23 @@
         ),
       ),
     );
-    const messageId = identities.length === 1 &&
-      (!request.message_id || identities[0] === request.message_id)
-      ? identities[0] : "";
-    if (!messageId) {
+    // The DOM rarely exposes an item identity. The host binds the exact message
+    // from Outlook's own conversation response; a DOM identity only adds a check.
+    if (
+      identities.length > 1 ||
+      (identities.length === 1 && request.message_id && identities[0] !== request.message_id)
+    ) {
       return {
-        state: identities.length > 1 ? "message_identity_ambiguous" : "message_identity_unavailable",
+        state: "message_identity_ambiguous",
         identity_candidate_count: identities.length,
       };
     }
+    const messageId = identities.length === 1 ? identities[0] : "";
     const summary = readRow(row);
     return {
       state: "read",
       item: summary,
-      message_id: messageId,
-      identity_authoritatively_verified: false,
+      dom_message_id: messageId,
       identity_candidate_count: identities.length,
       body_text: body.slice(0, 20001),
       body_truncated: body.length > 20000,

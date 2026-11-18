@@ -119,20 +119,33 @@ def test_open_and_read_require_the_exact_loaded_message_reference(page):
     detail = run_script(page, {"phase": "read", "conversation_id": "conversation-001"})
     assert detail["state"] == "read"
     assert detail["item"]["entry_id"] == "conversation-001"
-    assert detail["message_id"] == "message-001"
-    assert detail["identity_authoritatively_verified"] is False
+    assert detail["dom_message_id"] == "message-001"
+    assert "message_id" not in detail
     assert detail["body_text"] == "Verified message body"
     assert detail["body_truncated"] is False
 
 
-def test_read_refuses_conversation_without_exact_message_identity(page):
+def test_read_without_dom_identity_leaves_the_exact_message_to_the_host(page):
     set_inbox(page)
     page.locator('[data-convid="conversation-001"]').evaluate(
         "(element) => element.setAttribute('aria-selected', 'true')"
     )
     page.locator("[role=document]").evaluate("(element) => element.removeAttribute('data-itemid')")
     result = run_script(page, {"phase": "read", "conversation_id": "conversation-001"})
-    assert result["state"] == "message_identity_unavailable"
+    assert result["state"] == "read"
+    assert result["dom_message_id"] == ""
+
+
+def test_read_refuses_a_dom_identity_that_contradicts_the_request(page):
+    set_inbox(page)
+    page.locator('[data-convid="conversation-001"]').evaluate(
+        "(element) => element.setAttribute('aria-selected', 'true')"
+    )
+    result = run_script(
+        page,
+        {"phase": "read", "conversation_id": "conversation-001", "message_id": "message-009"},
+    )
+    assert result["state"] == "message_identity_ambiguous"
 
 
 def test_read_refuses_ambiguous_message_item_ids(page):
