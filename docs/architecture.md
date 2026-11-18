@@ -8,12 +8,13 @@
 
 ## Implementations
 
-- `office_bridge/desktop.py` invokes fixed, bounded PowerShell JSON-file adapters. The Outlook bridge preserves EntryID/StoreID identity and version checks. Teams desktop navigation refuses to take foreground focus.
+- `office_bridge/desktop.py` routes Outlook operations through the bounded named-pipe client for the launcher-owned WebView2 host. Teams desktop operations retain fixed, bounded PowerShell JSON-file adapters and refuse foreground navigation.
 - `office_bridge/teams/service.py` owns background reads and durable send/edit/upload reservations. The existing group SQLite ledger and self-send ledger retain their locations and unknown-outcome behavior. Edit and upload records use separate tables in the group ledger.
 - `office_bridge/teams/formatting.py` converts bounded Markdown to visible text, sanitized HTML, and expected formatting for browser verification.
 - `office_bridge/teams/lookup.py` validates directory search results before exposing exact chat references.
 - `office_bridge/teams/copilot.py` owns Copilot query contracts, private durable reservations, verified result caching, and model-choice validation.
 - `office_bridge/teams/session.py` is the bounded named-pipe client for the launcher-owned Teams host.
+- `office_bridge/outlook/session.py` and `runtime/outlook_supervisor.py` provide the bounded Outlook named-pipe client and launcher-owned host lifecycle.
 - `office_bridge/teams/backend.py` validates WebView2 status and retains optional Chromium/Edge diagnostics.
 - `office_bridge/runtime/supervisor.py` owns the hidden host lifecycle. `runtime/sdk.py` verifies the pinned SDK archive and DLL hashes.
 - `office_bridge/native/` holds the PowerShell, C#, and browser assets next to the Python implementation that uses them.
@@ -23,6 +24,8 @@
 The launcher starts one hidden WebView2 host before disposable Action Server workers. Its STA message loop keeps the controller alive between calls. The host owns the persistent-profile lock and serializes local named-pipe requests. A second hidden WebView2 controller in the same host handles protected rich-content composition without changing the Windows clipboard. It is not a separate HTTP or MCP server.
 
 A third controller is created on first Copilot use. It keeps the Copilot conversation separate from chat navigation and accesses the embedded Microsoft 365 pane through the supported WebView2 frame API. Work IQ and the question's exact conversation turn are checked in that pane. The initial query call submits at most once; later reads wait for settled text and collect observed inline links. Model choices come from the current dropdown and can be selected before a question is entered. No normal browser profile or authentication tokens are copied.
+
+Outlook uses its own locked persistent WebView2 profile and STA host. Its controller enables Windows SSO, leaves `CoreWebView2` audio enabled before navigation, and accepts only the Outlook and Microsoft sign-in hosts needed by the observed app redirect. Status requires an exact configured account match in Outlook's account menu; merely loading the app shell is insufficient. Inbox list and literal search return conversation references because the list DOM exposes conversation IDs. `outlook_get_message` must resolve a separate message item ID before returning a detail. The adapter leaves `MessageVersion.modified_at` null and uses `version_digest` to bind the observed message content and flags. Outlook mutation actions remain unavailable until their handlers and live identity checks pass.
 
 The host uses the existing Windows account SSO and dedicated profile. Teams refreshes that profile's own authentication; normal browser cookies are not copied. Authentication challenges are reported rather than bypassed.
 

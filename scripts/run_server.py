@@ -31,9 +31,11 @@ if __name__ == "__main__":
     stage_package()
     if dev:
         threading.Thread(target=watch_sources, daemon=True).start()
+    from office_bridge.runtime.outlook_supervisor import start as start_outlook_session
     from office_bridge.runtime.supervisor import start as start_teams_session
 
     start_teams_session(ROOT)
+    start_outlook_session(ROOT)
     raise SystemExit(
         main(
             [

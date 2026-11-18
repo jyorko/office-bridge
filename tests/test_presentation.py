@@ -55,12 +55,12 @@ def test_display_failure_keeps_completed_outlook_send(monkeypatch, failure):
 
     def run(*args, **kwargs):
         calls.append((args, kwargs))
-        return Response(result=receipt)
+        return receipt
 
     def fail(*args):
         raise failure
 
-    monkeypatch.setattr(outlook_actions.desktop, "run", run)
+    monkeypatch.setattr(outlook_actions, "submit_outlook_draft", run)
     monkeypatch.setattr(presentation, "present", fail)
     result = outlook_actions.outlook_send_draft(receipt.draft, "a" * 64)
     assert len(calls) == 1

@@ -11,14 +11,12 @@ Use a unique request ID for an authorized question. Read by that same ID to coll
 
 ## Outlook
 
-- `outlook_inbox_list(limit?, unread_only?)` lists recent mail; `outlook_search_inbox(query, limit?)` applies literal subject/sender and date/unread filters. `outlook_get_message(message)` reads a selected message. Carry the exact `MessageRef` and `MessageVersion` from results.
-- `outlook_download_attachments(entry_id, store_id, pdf_only?)` saves bounded attachments without opening them.
-- `outlook_create_reply_draft(source, body_text, expected_source, reply_all?)` creates a reply draft after checking the source version. Set `reply_all: true` to include the source message's other recipients, then inspect the returned recipients before sending. `outlook_create_mail_draft(recipient_email, subject, body_text)` is restricted to the signed-in user's company address. Neither sends.
-- `outlook_send_draft(draft, expected_digest)` submits an inspected draft. Require explicit authorization and pass the exact returned digest.
-- `outlook_archive(message, expected_source)` moves unchanged mail to its existing Archive folder. Require authorization and use the current version.
-
-Draft creation, send, archive, and attachment download have different effects; never treat a draft receipt as a sent message. If send or archive state is unclear, inspect Outlook before acting again.
-
+- Outlook uses a dedicated launcher-owned WebView2 profile. Require the host's exact configured-mailbox verification before reading or changing mail. A loaded app shell or account-picker option does not prove the active mailbox. Stop when `outlook_status.state` is `identity_unverified`. Never use classic Outlook, a normal browser profile, a keyboard, or the clipboard as a fallback.
+- The controller enables audio before navigation. The normal launcher keeps it hidden. Show it only when the user asks to inspect the isolated verification window.
+- `outlook_inbox_list(limit?, unread_only?)` and `outlook_search_inbox(query, limit?)` return conversation references. Outlook's list exposes conversation IDs. Pass a returned reference to `outlook_get_message(message)` to resolve an exact item ID. Do not use a conversation ID as a message ID.
+- `MessageVersion.version_digest` binds the observed message content and flags. The adapter leaves `modified_at` null when it has no exact modification time. Use the version returned by `outlook_get_message` for any future mutation.
+- The current live probe has verified mailbox identity and returned a bounded conversation list. It has not verified that the opened message pane exposes one exact item ID. `outlook_get_message` fails closed until the host proves that identity.
+- Draft, reply, attachment, send, and archive handlers remain unavailable and return `outlook_operation_unavailable`. Do not call them until their WebView2 handlers pass synthetic tests and the read-only exact-message smoke succeeds.
 ## Evidence packs
 
 `evidence_pack_create(pack)` packages caller-authored summary text, explicit source records (`reference`, `captured_at`, `content`), and coverage limitations. It does not fetch or independently verify sources. Packs allow up to 100 sources and 1 MiB total.

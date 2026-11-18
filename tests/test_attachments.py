@@ -31,13 +31,20 @@ def test_download_returns_typed_metadata_and_literal_reference(monkeypatch):
         }
 
     monkeypatch.setattr(desktop, "invoke", invoke)
-    response = api.outlook_download_attachments("entry'$(untrusted)", "store")
+    response = api.outlook_download_attachments(
+        "entry'$(untrusted)", "store", conversation_id="conversation-1"
+    )
     assert response.result.items[0].filename == "../invoice.pdf"
     assert response.result.items[0].sha256 == "a" * 64
     assert calls == [
         (
             "download_attachments",
-            {"entry_id": "entry'$(untrusted)", "store_id": "store", "pdf_only": False},
+            {
+                "entry_id": "entry'$(untrusted)",
+                "conversation_id": "conversation-1",
+                "store_id": "store",
+                "pdf_only": False,
+            },
         )
     ]
     api.outlook_download_attachments("entry", "store", pdf_only=True)

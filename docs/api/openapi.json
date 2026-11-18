@@ -13,7 +13,7 @@
     "/api/actions/desktop-office/outlook-inbox-list/run": {
       "post": {
         "summary": "Outlook Inbox List",
-        "description": "List the newest inbox mail within a bounded scan of 500 items.",
+        "description": "List recent inbox conversations within a bounded scan of 500 messages.\nThe returned reference is a conversation identity. Individual reads fail\nclosed until the host can verify an exact message identity.",
         "operationId": "outlook_inbox_list",
         "requestBody": {
           "content": {
@@ -56,22 +56,41 @@
                                   "ref": {
                                     "properties": {
                                       "entry_id": {
-                                        "type": "string",
-                                        "maxLength": 4096,
-                                        "minLength": 1,
-                                        "title": "Entry Id"
+                                        "title": "Entry Id",
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
                                       },
                                       "store_id": {
                                         "type": "string",
                                         "maxLength": 4096,
                                         "minLength": 1,
                                         "title": "Store Id"
+                                      },
+                                      "conversation_id": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Conversation Id"
                                       }
                                     },
                                     "additionalProperties": false,
                                     "type": "object",
                                     "required": [
-                                      "entry_id",
                                       "store_id"
                                     ],
                                     "title": "MessageRef"
@@ -79,9 +98,16 @@
                                   "version": {
                                     "properties": {
                                       "modified_at": {
-                                        "type": "string",
-                                        "format": "date-time",
-                                        "title": "Modified At"
+                                        "title": "Modified At",
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "format": "date-time"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
                                       },
                                       "subject": {
                                         "type": "string",
@@ -109,12 +135,22 @@
                                           "high"
                                         ],
                                         "title": "Importance"
+                                      },
+                                      "version_digest": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{64}$",
+                                        "title": "Version Digest"
+                                      },
+                                      "content_complete": {
+                                        "type": "boolean",
+                                        "title": "Content Complete"
                                       }
                                     },
                                     "additionalProperties": false,
                                     "type": "object",
                                     "required": [
-                                      "modified_at",
+                                      "version_digest",
+                                      "content_complete",
                                       "subject",
                                       "unread",
                                       "folder_entry_id",
@@ -362,22 +398,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -403,22 +458,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -426,9 +500,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -456,12 +537,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -532,7 +623,7 @@
     "/api/actions/desktop-office/outlook-get-message/run": {
       "post": {
         "summary": "Outlook Get Message",
-        "description": "Read mail with body capped at 20000 characters.",
+        "description": "Read one exact message with its body capped at 20000 characters.\nThis operation fails closed when Outlook does not expose an exact message\nidentity. Draft, reply, attachment, send, and archive actions are unavailable.",
         "operationId": "outlook_get_message",
         "requestBody": {
           "content": {
@@ -542,26 +633,45 @@
                   "message": {
                     "properties": {
                       "entry_id": {
-                        "type": "string",
-                        "maxLength": 4096,
-                        "minLength": 1,
-                        "title": "Entry Id"
+                        "title": "Entry Id",
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "store_id": {
                         "type": "string",
                         "maxLength": 4096,
                         "minLength": 1,
                         "title": "Store Id"
+                      },
+                      "conversation_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Conversation Id"
                       }
                     },
                     "additionalProperties": false,
                     "type": "object",
                     "required": [
-                      "entry_id",
                       "store_id"
                     ],
                     "title": "Message",
-                    "description": "Entry and store identity returned by a mail listing."
+                    "description": "A conversation reference from a list, or an exact message\nreference returned by an earlier read."
                   }
                 },
                 "type": "object",
@@ -587,22 +697,41 @@
                             "ref": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -610,9 +739,16 @@
                             "version": {
                               "properties": {
                                 "modified_at": {
-                                  "type": "string",
-                                  "format": "date-time",
-                                  "title": "Modified At"
+                                  "title": "Modified At",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "subject": {
                                   "type": "string",
@@ -640,12 +776,22 @@
                                     "high"
                                   ],
                                   "title": "Importance"
+                                },
+                                "version_digest": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$",
+                                  "title": "Version Digest"
+                                },
+                                "content_complete": {
+                                  "type": "boolean",
+                                  "title": "Content Complete"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "modified_at",
+                                "version_digest",
+                                "content_complete",
                                 "subject",
                                 "unread",
                                 "folder_entry_id",
@@ -918,22 +1064,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -959,22 +1124,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -982,9 +1166,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -1012,12 +1203,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -1177,22 +1378,41 @@
                                   "ref": {
                                     "properties": {
                                       "entry_id": {
-                                        "type": "string",
-                                        "maxLength": 4096,
-                                        "minLength": 1,
-                                        "title": "Entry Id"
+                                        "title": "Entry Id",
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
                                       },
                                       "store_id": {
                                         "type": "string",
                                         "maxLength": 4096,
                                         "minLength": 1,
                                         "title": "Store Id"
+                                      },
+                                      "conversation_id": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Conversation Id"
                                       }
                                     },
                                     "additionalProperties": false,
                                     "type": "object",
                                     "required": [
-                                      "entry_id",
                                       "store_id"
                                     ],
                                     "title": "MessageRef"
@@ -1200,9 +1420,16 @@
                                   "version": {
                                     "properties": {
                                       "modified_at": {
-                                        "type": "string",
-                                        "format": "date-time",
-                                        "title": "Modified At"
+                                        "title": "Modified At",
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "format": "date-time"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
                                       },
                                       "subject": {
                                         "type": "string",
@@ -1230,12 +1457,22 @@
                                           "high"
                                         ],
                                         "title": "Importance"
+                                      },
+                                      "version_digest": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{64}$",
+                                        "title": "Version Digest"
+                                      },
+                                      "content_complete": {
+                                        "type": "boolean",
+                                        "title": "Content Complete"
                                       }
                                     },
                                     "additionalProperties": false,
                                     "type": "object",
                                     "required": [
-                                      "modified_at",
+                                      "version_digest",
+                                      "content_complete",
                                       "subject",
                                       "unread",
                                       "folder_entry_id",
@@ -1483,22 +1720,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -1524,22 +1780,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -1547,9 +1822,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -1577,12 +1859,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -1663,26 +1955,45 @@
                   "source": {
                     "properties": {
                       "entry_id": {
-                        "type": "string",
-                        "maxLength": 4096,
-                        "minLength": 1,
-                        "title": "Entry Id"
+                        "title": "Entry Id",
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "store_id": {
                         "type": "string",
                         "maxLength": 4096,
                         "minLength": 1,
                         "title": "Store Id"
+                      },
+                      "conversation_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Conversation Id"
                       }
                     },
                     "additionalProperties": false,
                     "type": "object",
                     "required": [
-                      "entry_id",
                       "store_id"
                     ],
                     "title": "Source",
-                    "description": "Entry and store identity of the source mail."
+                    "description": "Exact message reference returned by outlook_get_message."
                   },
                   "body_text": {
                     "type": "string",
@@ -1692,9 +2003,16 @@
                   "expected_source": {
                     "properties": {
                       "modified_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "title": "Modified At"
+                        "title": "Modified At",
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "subject": {
                         "type": "string",
@@ -1722,12 +2040,22 @@
                           "high"
                         ],
                         "title": "Importance"
+                      },
+                      "version_digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "title": "Version Digest"
+                      },
+                      "content_complete": {
+                        "type": "boolean",
+                        "title": "Content Complete"
                       }
                     },
                     "additionalProperties": false,
                     "type": "object",
                     "required": [
-                      "modified_at",
+                      "version_digest",
+                      "content_complete",
                       "subject",
                       "unread",
                       "folder_entry_id",
@@ -1735,7 +2063,7 @@
                       "importance"
                     ],
                     "title": "Expected Source",
-                    "description": "Unchanged version returned by the last mail read."
+                    "description": "Content/version digest returned by the last message read."
                   },
                   "reply_all": {
                     "type": "boolean",
@@ -1769,22 +2097,41 @@
                             "ref": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -1792,22 +2139,41 @@
                             "source": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -2023,22 +2389,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -2064,22 +2449,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -2087,9 +2491,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -2117,12 +2528,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -2203,22 +2624,41 @@
                   "draft": {
                     "properties": {
                       "entry_id": {
-                        "type": "string",
-                        "maxLength": 4096,
-                        "minLength": 1,
-                        "title": "Entry Id"
+                        "title": "Entry Id",
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "store_id": {
                         "type": "string",
                         "maxLength": 4096,
                         "minLength": 1,
                         "title": "Store Id"
+                      },
+                      "conversation_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Conversation Id"
                       }
                     },
                     "additionalProperties": false,
                     "type": "object",
                     "required": [
-                      "entry_id",
                       "store_id"
                     ],
                     "title": "Draft",
@@ -2254,22 +2694,41 @@
                             "draft": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -2290,7 +2749,8 @@
                             "subject": {
                               "anyOf": [
                                 {
-                                  "type": "string"
+                                  "type": "string",
+                                  "maxLength": 250
                                 },
                                 {
                                   "type": "null"
@@ -2301,7 +2761,8 @@
                             "body_text": {
                               "anyOf": [
                                 {
-                                  "type": "string"
+                                  "type": "string",
+                                  "maxLength": 20000
                                 },
                                 {
                                   "type": "null"
@@ -2313,6 +2774,28 @@
                               "type": "boolean",
                               "title": "Body Truncated",
                               "default": false
+                            },
+                            "account_verified": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Account Verified"
+                            },
+                            "sent_items_verified": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Sent Items Verified"
                             }
                           },
                           "additionalProperties": false,
@@ -2470,22 +2953,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -2511,22 +3013,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -2534,9 +3055,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -2564,12 +3092,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -2688,22 +3226,41 @@
                             "ref": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -2824,33 +3381,59 @@
                   "message": {
                     "properties": {
                       "entry_id": {
-                        "type": "string",
-                        "maxLength": 4096,
-                        "minLength": 1,
-                        "title": "Entry Id"
+                        "title": "Entry Id",
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "store_id": {
                         "type": "string",
                         "maxLength": 4096,
                         "minLength": 1,
                         "title": "Store Id"
+                      },
+                      "conversation_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Conversation Id"
                       }
                     },
                     "additionalProperties": false,
                     "type": "object",
                     "required": [
-                      "entry_id",
                       "store_id"
                     ],
                     "title": "Message",
-                    "description": "Entry and store identity of the inbox mail."
+                    "description": "Exact message reference returned by outlook_get_message."
                   },
                   "expected_source": {
                     "properties": {
                       "modified_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "title": "Modified At"
+                        "title": "Modified At",
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "subject": {
                         "type": "string",
@@ -2878,12 +3461,22 @@
                           "high"
                         ],
                         "title": "Importance"
+                      },
+                      "version_digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "title": "Version Digest"
+                      },
+                      "content_complete": {
+                        "type": "boolean",
+                        "title": "Content Complete"
                       }
                     },
                     "additionalProperties": false,
                     "type": "object",
                     "required": [
-                      "modified_at",
+                      "version_digest",
+                      "content_complete",
                       "subject",
                       "unread",
                       "folder_entry_id",
@@ -2891,7 +3484,7 @@
                       "importance"
                     ],
                     "title": "Expected Source",
-                    "description": "Unchanged version returned by the last mail read."
+                    "description": "Unchanged content/version digest returned by the last read."
                   }
                 },
                 "type": "object",
@@ -2918,22 +3511,41 @@
                             "original": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -2941,22 +3553,41 @@
                             "archived": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -3452,22 +4083,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -3493,22 +4143,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -3516,9 +4185,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -3546,12 +4222,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -3632,18 +4318,30 @@
                   "entry_id": {
                     "type": "string",
                     "title": "Entry Id",
-                    "description": "Exact message entry identity returned by an Outlook mail listing."
+                    "description": "Exact message identity returned by outlook_get_message."
                   },
                   "store_id": {
                     "type": "string",
                     "title": "Store Id",
-                    "description": "Exact store identity returned with the message entry identity."
+                    "description": "Exact store identity returned with the message."
                   },
                   "pdf_only": {
                     "type": "boolean",
                     "title": "Pdf Only",
                     "description": "Save only PDF attachments, excluding signature images and other files.",
                     "default": false
+                  },
+                  "conversation_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Conversation Id",
+                    "description": "Conversation identity returned with the message, when available."
                   }
                 },
                 "type": "object",
@@ -3670,22 +4368,41 @@
                             "ref": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -7389,22 +8106,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -7430,22 +8166,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -7453,9 +8208,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -7483,12 +8245,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -7911,22 +8683,41 @@
                                           {
                                             "properties": {
                                               "entry_id": {
-                                                "type": "string",
-                                                "maxLength": 4096,
-                                                "minLength": 1,
-                                                "title": "Entry Id"
+                                                "title": "Entry Id",
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
                                               },
                                               "store_id": {
                                                 "type": "string",
                                                 "maxLength": 4096,
                                                 "minLength": 1,
                                                 "title": "Store Id"
+                                              },
+                                              "conversation_id": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "maxLength": 4096,
+                                                    "minLength": 1
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ],
+                                                "title": "Conversation Id"
                                               }
                                             },
                                             "additionalProperties": false,
                                             "type": "object",
                                             "required": [
-                                              "entry_id",
                                               "store_id"
                                             ],
                                             "title": "MessageRef"
@@ -7952,22 +8743,41 @@
                                     "source": {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -7975,9 +8785,16 @@
                                     "version": {
                                       "properties": {
                                         "modified_at": {
-                                          "type": "string",
-                                          "format": "date-time",
-                                          "title": "Modified At"
+                                          "title": "Modified At",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "subject": {
                                           "type": "string",
@@ -8005,12 +8822,22 @@
                                             "high"
                                           ],
                                           "title": "Importance"
+                                        },
+                                        "version_digest": {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{64}$",
+                                          "title": "Version Digest"
+                                        },
+                                        "content_complete": {
+                                          "type": "boolean",
+                                          "title": "Content Complete"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "modified_at",
+                                        "version_digest",
+                                        "content_complete",
                                         "subject",
                                         "unread",
                                         "folder_entry_id",
@@ -11877,22 +12704,41 @@
                                   {
                                     "properties": {
                                       "entry_id": {
-                                        "type": "string",
-                                        "maxLength": 4096,
-                                        "minLength": 1,
-                                        "title": "Entry Id"
+                                        "title": "Entry Id",
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
                                       },
                                       "store_id": {
                                         "type": "string",
                                         "maxLength": 4096,
                                         "minLength": 1,
                                         "title": "Store Id"
+                                      },
+                                      "conversation_id": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Conversation Id"
                                       }
                                     },
                                     "additionalProperties": false,
                                     "type": "object",
                                     "required": [
-                                      "entry_id",
                                       "store_id"
                                     ],
                                     "title": "MessageRef"
@@ -11918,22 +12764,41 @@
                             "source": {
                               "properties": {
                                 "entry_id": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "minLength": 1,
-                                  "title": "Entry Id"
+                                  "title": "Entry Id",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "store_id": {
                                   "type": "string",
                                   "maxLength": 4096,
                                   "minLength": 1,
                                   "title": "Store Id"
+                                },
+                                "conversation_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096,
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Conversation Id"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "entry_id",
                                 "store_id"
                               ],
                               "title": "MessageRef"
@@ -11941,9 +12806,16 @@
                             "version": {
                               "properties": {
                                 "modified_at": {
-                                  "type": "string",
-                                  "format": "date-time",
-                                  "title": "Modified At"
+                                  "title": "Modified At",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "subject": {
                                   "type": "string",
@@ -11971,12 +12843,22 @@
                                     "high"
                                   ],
                                   "title": "Importance"
+                                },
+                                "version_digest": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$",
+                                  "title": "Version Digest"
+                                },
+                                "content_complete": {
+                                  "type": "boolean",
+                                  "title": "Content Complete"
                                 }
                               },
                               "additionalProperties": false,
                               "type": "object",
                               "required": [
-                                "modified_at",
+                                "version_digest",
+                                "content_complete",
                                 "subject",
                                 "unread",
                                 "folder_entry_id",
@@ -12159,22 +13041,41 @@
                                     {
                                       "properties": {
                                         "entry_id": {
-                                          "type": "string",
-                                          "maxLength": 4096,
-                                          "minLength": 1,
-                                          "title": "Entry Id"
+                                          "title": "Entry Id",
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
                                         "store_id": {
                                           "type": "string",
                                           "maxLength": 4096,
                                           "minLength": 1,
                                           "title": "Store Id"
+                                        },
+                                        "conversation_id": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "minLength": 1
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "title": "Conversation Id"
                                         }
                                       },
                                       "additionalProperties": false,
                                       "type": "object",
                                       "required": [
-                                        "entry_id",
                                         "store_id"
                                       ],
                                       "title": "MessageRef"
@@ -12200,22 +13101,41 @@
                               "source": {
                                 "properties": {
                                   "entry_id": {
-                                    "type": "string",
-                                    "maxLength": 4096,
-                                    "minLength": 1,
-                                    "title": "Entry Id"
+                                    "title": "Entry Id",
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 4096,
+                                        "minLength": 1
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
                                   },
                                   "store_id": {
                                     "type": "string",
                                     "maxLength": 4096,
                                     "minLength": 1,
                                     "title": "Store Id"
+                                  },
+                                  "conversation_id": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 4096,
+                                        "minLength": 1
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Conversation Id"
                                   }
                                 },
                                 "additionalProperties": false,
                                 "type": "object",
                                 "required": [
-                                  "entry_id",
                                   "store_id"
                                 ],
                                 "title": "MessageRef"
@@ -12223,9 +13143,16 @@
                               "version": {
                                 "properties": {
                                   "modified_at": {
-                                    "type": "string",
-                                    "format": "date-time",
-                                    "title": "Modified At"
+                                    "title": "Modified At",
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
                                   },
                                   "subject": {
                                     "type": "string",
@@ -12253,12 +13180,22 @@
                                       "high"
                                     ],
                                     "title": "Importance"
+                                  },
+                                  "version_digest": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$",
+                                    "title": "Version Digest"
+                                  },
+                                  "content_complete": {
+                                    "type": "boolean",
+                                    "title": "Content Complete"
                                   }
                                 },
                                 "additionalProperties": false,
                                 "type": "object",
                                 "required": [
-                                  "modified_at",
+                                  "version_digest",
+                                  "content_complete",
                                   "subject",
                                   "unread",
                                   "folder_entry_id",

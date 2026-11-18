@@ -1,102 +1,106 @@
-"""No Office calls: exercise the real boundary with fake subprocess results."""
-
-import json
-import subprocess
-from pathlib import Path
+"""No Office calls: exercise typed Outlook and Teams boundaries offline."""
 
 import pytest
+from actions import ActionError
 from pydantic import ValidationError
 
 import outlook_actions as api
 from office_bridge import desktop as bridge
+from office_bridge.outlook import session
 from office_bridge.teams.models import ChatRef
 
 
 @pytest.fixture
-def fake_process(monkeypatch):
+def fake_outlook_session(monkeypatch):
     state = {
-        "envelope": {
-            "version": 1,
-            "ok": True,
-            "result": {"items": [], "truncated": False, "scanned_count": 0},
-        }
+        "result": {"items": [], "truncated": False, "scanned_count": 0},
+        "calls": [],
     }
 
-    class Process:
-        pid = 987654
+    def invoke(operation, arguments, timeout):
+        state["calls"].append((operation, arguments, timeout))
+        if state.get("error"):
+            raise session.SessionError(state["error"])
+        return state.get("result", {})
 
-        def __init__(self, args, **kwargs):
-            state["args"] = args
-            state["kwargs"] = kwargs
-            state["request"] = json.loads(
-                Path(args[args.index("-RequestFile") + 1]).read_text(encoding="utf-8")
-            )
-            output = Path(args[args.index("-ResultFile") + 1])
-            output.write_text(state.get("raw", json.dumps(state["envelope"])), encoding="utf-8")
-
-        def wait(self, timeout):
-            if state.get("timeout") and not state.get("killed"):
-                raise subprocess.TimeoutExpired("powershell", timeout)
-            return 0
-
-        def kill(self):
-            state["killed"] = True
-
-    monkeypatch.setattr(bridge.subprocess, "Popen", Process)
-    monkeypatch.setattr(
-        bridge.subprocess, "run", lambda args, **kwargs: state.update(termination=args)
-    )
+    monkeypatch.setattr(bridge.os, "name", "nt")
+    monkeypatch.setattr(session, "invoke", invoke)
     return state
 
 
-def test_literal_query_and_argument_array(fake_process):
+def test_literal_query_is_passed_as_structured_data(fake_outlook_session):
     query = "%' ; $(Remove-Item x); \" OR 1=1 — café"
     result = api.outlook_search_inbox(api.InboxQuery(subject_contains=query), limit=3)
     assert result.result.items == []
-    assert fake_process["request"]["arguments"]["query"]["subject_contains"] == query
-    assert fake_process["kwargs"]["shell"] is False
-    assert fake_process["kwargs"]["creationflags"] == subprocess.CREATE_NO_WINDOW
-    assert query not in " ".join(fake_process["args"])
-    assert not Path(fake_process["args"][-1]).exists()
+    assert fake_outlook_session["calls"] == [
+        (
+            "outlook_search_inbox",
+            {
+                "query": {
+                    "subject_contains": query,
+                    "sender_contains": None,
+                    "received_after": None,
+                    "unread_only": False,
+                },
+                "limit": 3,
+            },
+            90,
+        )
+    ]
 
 
 @pytest.mark.parametrize("code", ["desktop_busy", "not_found", "stale_draft", "ambiguous_chat"])
-def test_structured_failures_do_not_retry(fake_process, code):
-    fake_process["envelope"] = {"version": 1, "ok": False, "error": code}
+def test_structured_failures_do_not_retry(fake_outlook_session, code):
+    fake_outlook_session["error"] = code
     with pytest.raises(bridge.BridgeError, match=code):
         bridge.invoke("get_message", {"message": {"entry_id": "entry", "store_id": "wrong-store"}})
-    assert fake_process["request"]["arguments"]["message"]["store_id"] == "wrong-store"
+    assert len(fake_outlook_session["calls"]) == 1
 
 
 @pytest.mark.parametrize(
-    "operation,code",
-    [
-        ("get_message", "timeout"),
-        ("send_draft", "mutation_outcome_unknown"),
-        ("create_mail_draft", "mutation_outcome_unknown"),
-    ],
+    "operation",
+    ["get_message"],
 )
-def test_timeout_terminates_only_own_tree(fake_process, operation, code):
-    fake_process["timeout"] = True
-    with pytest.raises(bridge.BridgeError, match=code):
+def test_read_session_timeout_is_reported_once(fake_outlook_session, operation):
+    fake_outlook_session["error"] = "session_timeout"
+    with pytest.raises(bridge.BridgeError, match="session_timeout"):
         bridge.invoke(operation, {})
-    assert fake_process["killed"]
-    assert fake_process["termination"][-4:] == ["/PID", "987654", "/T", "/F"]
+    assert len(fake_outlook_session["calls"]) == 1
 
 
 @pytest.mark.parametrize(
-    "raw,code",
+    "operation",
     [
-        ("x" * (bridge.MAX_BYTES + 1), "output_overflow"),
-        ("not-json", "invalid_bridge_result"),
-        ('{"version":2}', "invalid_bridge_result"),
+        "inbox_list",
+        "get_message",
+        "search_inbox",
     ],
-    ids=["overflow", "malformed", "wrong-version"],
 )
-def test_invalid_or_oversized_result(fake_process, raw, code):
-    fake_process["raw"] = raw
-    with pytest.raises(bridge.BridgeError, match=code):
-        bridge.invoke("inbox_list", {})
+def test_outlook_does_not_start_classic_powershell(operation, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Outlook must use the persistent WebView2 host.")
+
+    monkeypatch.setattr(bridge.os, "name", "nt")
+    monkeypatch.setattr(bridge.subprocess, "Popen", forbidden)
+    monkeypatch.setattr(
+        session,
+        "invoke",
+        lambda name, arguments, timeout: {"items": [], "truncated": False, "scanned_count": 0},
+    )
+    bridge.invoke(operation, {})
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["create_reply_draft", "create_mail_draft", "send_draft", "archive", "download_attachments"],
+)
+def test_outlook_mutations_stay_unavailable_until_web_handlers_exist(operation, monkeypatch):
+    calls = []
+    monkeypatch.setattr(bridge.os, "name", "nt")
+    monkeypatch.setattr(session, "invoke", lambda *args, **kwargs: calls.append(args))
+    with pytest.raises(bridge.BridgeError, match="outlook_operation_unavailable"):
+        bridge.invoke(operation, {})
+    assert calls == []
 
 
 def test_models_reject_executable_fields_and_bad_identity():
@@ -110,7 +114,7 @@ def test_models_reject_executable_fields_and_bad_identity():
         api.InboxQuery(subject_contains="x" * 501)
 
 
-def test_output_contract_rejects_unexpected_fields(fake_process):
-    fake_process["envelope"]["result"]["run_script"] = "danger"
-    with pytest.raises(ValidationError):
+def test_output_contract_rejects_unexpected_fields(fake_outlook_session):
+    fake_outlook_session["result"]["run_script"] = "danger"
+    with pytest.raises((ValidationError, ActionError)):
         api.outlook_inbox_list()
