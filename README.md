@@ -29,7 +29,7 @@ The server runs hidden in your Windows user session. It is not a Windows service
 
 ## Message views
 
-Outlook mail, Teams conversations and send receipts share a reading view alongside each action’s original result. Inbox rows expand to show returned mail details. The unread filter, history previews and message disclosures work locally. The native MCP App and T3 show the view inline. Ordinary Codex opens the same document in a dedicated, non-activating WebView2 window. The viewer receives HTML over a pipe, uses an InPrivate controller and reuses an open window across action workers. The [presentation guide](.agents/skills/office-bridge-mcp/references/presentation.md) covers client discovery, explicit window opening in T3 and text fallback.
+Outlook mail, Teams conversations and send receipts share a view alongside each action’s original result. Inbox expansion and filtering work locally. In T3’s native MCP App, **Read email** opens a specific message. Choose **Reply** or **Reply all**, write the reply, then choose **Create draft** to save it in Outlook. Ordinary Codex opens the same view in a dedicated, non-activating InPrivate WebView2 window. The window verifies the mail controls against the running server and reuses its identity across action workers. The [presentation guide](.agents/skills/office-bridge-mcp/references/presentation.md) covers the native app, script-free reading fallback and explicit window opening in T3.
 
 ## Layout
 

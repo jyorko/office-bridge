@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from actions import Response
@@ -6,7 +8,7 @@ from actions import Response
 import office_presentation_actions
 import outlook_actions
 import teams_actions
-from office_bridge import presentation
+from office_bridge import canvas_dispatch, presentation
 from office_bridge.outlook.models import MessageRef, SendReceipt
 from office_bridge.teams.models import GroupReceipt, WebChatHistory, WebChatMessage, WebChatRef
 
@@ -109,6 +111,20 @@ def test_mail_and_empty_and_partial_views():
     assert presentation.message_view({"items": [], "truncated": False}).empty == "No messages found"
 
 
+def test_unnamed_teams_messages_have_distinct_rows_and_keep_chat_scope():
+    view = presentation.message_view(
+        {
+            "chat": {"exact_tree_label": "Design review"},
+            "messages": [{"text": "First note"}, {"text": "Second note"}],
+            "captured_at": "2026-11-18T10:00:00Z",
+        }
+    )
+    assert view.title == "Design review"
+    assert [card.heading for card in view.cards] == ["Message 1", "Message 2"]
+    assert "2 loaded messages" in view.detail
+    assert "Captured" in view.detail
+
+
 def test_preview_boundary_and_unread_are_shared_display_fields():
     short = presentation.Card(kind="chat", heading="Alex", body="🚀" * 400)
     long = presentation.Card(kind="chat", heading="Alex", body="🚀" * 401)
@@ -172,3 +188,82 @@ def test_browser_fallback_uses_existing_view_identity(monkeypatch):
     assert receipt.opened
     assert seen[0].view_id == existing.view_id
     assert seen[0].html == existing.html
+
+
+def test_window_dispatch_binds_source_version_view_and_instance(monkeypatch):
+    monkeypatch.setenv("OFFICE_CANVAS_SIGNING_KEY", "fixture-key")
+    monkeypatch.setenv("OFFICE_CANVAS_ROOT", "fixture-root")
+    monkeypatch.setattr(
+        canvas_dispatch,
+        "server_record",
+        lambda _: {"instance": "fixture", "mcp_url": "http://127.0.0.1:1/mcp"},
+    )
+    source = MessageRef(entry_id="fixture-mail", store_id="fixture-store")
+    version = dict(
+        modified_at="2026-11-18T09:00:00Z",
+        subject="Agenda",
+        unread=False,
+        folder_entry_id="fixture-folder",
+        flagged=False,
+        importance="normal",
+    )
+    if "content_complete" in presentation.MessageVersion.model_fields:
+        version.update(content_complete=True, version_digest="b" * 64)
+    display = presentation.present(
+        presentation.View(source="Outlook", cards=[{"heading": "Agenda", "kind": "mail"}])
+    )
+    display.mail = presentation.ReplyToMail(source=source, version=version)
+    display.window_proof = display.proof()
+    args = dict(
+        source=source.model_dump(),
+        expected_source=display.mail.version.model_dump(mode="json"),
+        reply_all=True,
+        body_text="Fixture text",
+    )
+    click = dict(
+        display=display.model_dump(mode="json"),
+        instance="fixture",
+        name="outlook_create_reply_draft",
+        arguments=args,
+    )
+    runtime = MagicMock()
+    runtime.post.return_value.status_code = 200
+    runtime.post.return_value.json.return_value = {"result": {"subject": "Saved fixture"}}
+    monkeypatch.setattr(canvas_dispatch.requests, "Session", lambda: runtime)
+    runtime.__enter__.return_value = runtime
+    for bad in (
+        {**click, "name": "outlook_send_draft"},
+        {**click, "instance": "different"},
+        {**click, "arguments": {**args, "source": {**args["source"], "entry_id": "other"}}},
+        {
+            **click,
+            "arguments": {**args, "expected_source": {**args["expected_source"], "unread": True}},
+        },
+        {**click, "display": {**click["display"], "view_id": "different"}},
+    ):
+        with pytest.raises(ValueError):
+            canvas_dispatch.dispatch(bad)
+    runtime.post.assert_not_called()
+    assert canvas_dispatch.dispatch(click) == {"result": {"subject": "Saved fixture"}}
+    runtime.post.assert_called_once_with(
+        "http://127.0.0.1:1/api/actions/desktop-office/outlook-create-reply-draft/run",
+        json=args,
+        timeout=(3, 65),
+        allow_redirects=False,
+    )
+
+
+def test_conversation_read_requires_resolved_and_complete_version_to_reply():
+    ref = SimpleNamespace(store_id="store", conversation_id="conversation", entry_id=None)
+    version = SimpleNamespace(content_complete=True, version_digest="a" * 64)
+    assert presentation.can_read(ref)
+    assert not presentation.can_reply(ref, version)
+    ref.entry_id = "individual-message"
+    assert presentation.can_reply(ref, version)
+    version.content_complete = False
+    assert not presentation.can_reply(ref, version)
+    version.content_complete = True
+    message = SimpleNamespace(ref=ref, version=version, body_truncated=False)
+    assert not presentation.can_offer_reply(message)
+    message.can_create_reply_draft = True
+    assert presentation.can_offer_reply(message)

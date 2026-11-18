@@ -4,6 +4,8 @@
     [Parameter(Mandatory=$true)][string]$ViewId,
     [Parameter(Mandatory=$true)][string]$Digest,
     [Parameter(Mandatory=$true)][int]$Count,
+    [string]$Python,
+    [string]$Source,
     [switch]$VerifyHidden
 )
 $ErrorActionPreference = 'Stop'
@@ -13,6 +15,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CanvasWindow.cs') -ReferencedAssemblies
     [System.Windows.Forms.Form].Assembly.Location,
     [System.Drawing.Size].Assembly.Location,
     (Join-Path $Sdk 'Microsoft.Web.WebView2.Core.dll'),
-    'System.Core'
+    'System.Core',
+    'System.Web.Extensions'
 )
-[CanvasWindow]::Run($Sdk, $Profile, $ViewId, $Digest, $Count, $VerifyHidden.IsPresent)
+[CanvasWindow]::Run($Sdk, $Profile, $ViewId, $Digest, $Count, $VerifyHidden.IsPresent, $Python, $Source)

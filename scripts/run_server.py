@@ -1,6 +1,7 @@
 """Launch the supported Actions Runtime CLI without secrets in process arguments."""
 
 import os
+import secrets
 import sys
 import threading
 from pathlib import Path
@@ -25,6 +26,8 @@ if __name__ == "__main__":
     prepare_local_state(dev=dev, teams_account=os.environ.get("OFFICE_BRIDGE_TEAMS_ACCOUNT"))
     os.environ.pop("OFFICE_BRIDGE_TEAMS_ACCOUNT", None)
     os.environ["OFFICE_BRIDGE_ACCOUNT"] = configured_account()
+    os.environ["OFFICE_CANVAS_SIGNING_KEY"] = secrets.token_hex(32)
+    os.environ["OFFICE_CANVAS_ROOT"] = str(ROOT)
     stage_package()
     if dev:
         threading.Thread(target=watch_sources, daemon=True).start()

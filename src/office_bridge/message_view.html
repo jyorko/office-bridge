@@ -481,12 +481,46 @@
       #window-action {
         margin-top: 10px;
       }
+      .mail-actions, .composer-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .mail-row + .mail-actions {
+        margin: 0;
+        padding: 0 21px 13px;
+      }
+      .mail-actions button, .primary-action {
+        color: var(--blue);
+        background: color-mix(in srgb, var(--blue) 7%, var(--sheet));
+      }
+      .composer {
+        margin-top: 16px;
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+      }
+      .composer label { display: block; font-weight: 600; }
+      .composer textarea {
+        display: block;
+        width: 100%;
+        margin-top: 6px;
+        padding: 10px 12px;
+        resize: vertical;
+        font: inherit;
+        color: var(--ink);
+        background: var(--sheet);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      #action-status:not(:empty) { margin-top: 10px; }
       button {
         font-family: inherit;
         font-weight: 600;
       }
       button:disabled {
-        cursor: wait;
+        opacity: .6;
+        cursor: default;
       }
       @media (max-width: 480px) {
         .mast {
@@ -542,6 +576,7 @@
   <body>
     <main id="messages" aria-label="Office messages"><!--messages--></main>
     <div id="window-action"></div>
+    <p id="action-status" role="status"></p>
     <!--host-->
   </body>
 </html>

@@ -1,5 +1,6 @@
 """Hand the script-free document to a separate Windows viewer over anonymous pipes."""
 
+import base64
 import hashlib
 import json
 import os
@@ -11,7 +12,8 @@ import threading
 from pathlib import Path
 
 from office_bridge.paths import NATIVE
-from office_bridge.presentation import Presentation
+from office_bridge.presentation import Presentation, app_script, present
+from office_bridge.runtime.endpoint import server_record
 from office_bridge.runtime.local_state import config_directory
 from office_bridge.runtime.sdk import install
 
@@ -43,15 +45,32 @@ def start_viewer(
         "-ViewId",
         presentation.view_id,
         "-Digest",
-        hashlib.sha256(
-            json.dumps(presentation.view.model_dump(), sort_keys=True).encode()
-        ).hexdigest(),
+        presentation.identity(),
         "-Count",
         str(len(presentation.view.cards)),
     ]
     if verify_hidden:
         args.append("-VerifyHidden")
-    payload = presentation.html.encode("utf-8")
+    # Shared HTML is always script-free. Only the isolated host installs the
+    # packaged controller and gives that exact script permission to run.
+    document = present(presentation.view).html
+    envelope = {"document": document}
+    proof = presentation.proof()
+    root = os.environ.get("OFFICE_CANVAS_ROOT")
+    source = Path(root) / ".package/src" if root else None
+    if verify_hidden and source and not source.is_dir():
+        source = NATIVE.parents[1]
+    if proof and proof == presentation.window_proof and source and source.is_dir():
+        record = server_record(Path(root))
+        script = app_script()
+        envelope.update(
+            document=document.replace("<!--host-->", f"<script>{script}</script>"),
+            script_hash=base64.b64encode(hashlib.sha256(script.encode()).digest()).decode(),
+            display=presentation.model_dump(mode="json"),
+            instance=record["instance"],
+        )
+        args.extend(["-Python", sys.executable, "-Source", str(source)])
+    payload = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
     launcher = subprocess.Popen(
         [sys.executable, "-c", LAUNCH, *args],
         stdin=subprocess.PIPE,

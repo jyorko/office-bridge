@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -6,6 +7,8 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 
@@ -18,6 +21,9 @@ public sealed class CanvasWindow : Form
     [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr window, int command);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     CoreWebView2Controller controller;
+    readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024 };
+    Dictionary<string, object> display;
+    bool busy, attempted;
     protected override bool ShowWithoutActivation { get { return true; } }
 
     CanvasWindow()
@@ -29,10 +35,80 @@ public sealed class CanvasWindow : Form
         Resize += (s, e) => { if (controller != null) controller.Bounds = ClientRectangle; };
     }
 
-    async void LoadPage(string profile, byte[] document, int count, bool hidden, Action loaded)
+    Dictionary<string, object> Dispatch(string python, string source, object click)
+    {
+        var info = new ProcessStartInfo(python, "-m office_bridge.canvas_dispatch") {
+            WorkingDirectory = source, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        using (var child = Process.Start(info))
+        {
+            child.BeginErrorReadLine();
+            var payload = Encoding.UTF8.GetBytes(json.Serialize(click));
+            using (var stream = child.StandardInput.BaseStream) stream.Write(payload, 0, payload.Length);
+            var reply = child.StandardOutput.ReadToEnd();
+            child.WaitForExit();
+            return json.Deserialize<Dictionary<string, object>>(reply);
+        }
+    }
+
+    void Connect(CoreWebView2 core, string python, string source, object instance)
+    {
+        Action<object> post = value => core.PostWebMessageAsJson(json.Serialize(value));
+        core.WebMessageReceived += async (s, e) => {
+            if (e.Source != Page) return;
+            try
+            {
+                var rpc = json.Deserialize<Dictionary<string, object>>(e.WebMessageAsJson);
+                if (!Object.Equals(rpc["jsonrpc"], "2.0")) return;
+                string method = rpc["method"] as string;
+                if (method == "ui/initialize")
+                    post(new { jsonrpc = "2.0", id = rpc["id"], result = new {
+                        protocolVersion = "2026-01-26", hostCapabilities = new { serverTools = new object() }
+                    }});
+                else if (method == "ui/notifications/initialized")
+                    post(new { jsonrpc = "2.0", method = "ui/notifications/tool-result",
+                        @params = new { structuredContent = display }});
+                else if (method == "tools/call")
+                {
+                    var args = (Dictionary<string, object>)rpc["params"];
+                    var name = args["name"] as string;
+                    if (busy || attempted || (name != "outlook_get_message" && name != "outlook_create_reply_draft")) return;
+                    busy = true;
+                    attempted = name == "outlook_create_reply_draft";
+                    try
+                    {
+                        var click = new { display, instance, name, arguments = args["arguments"] };
+                        var result = await Task.Run(() => Dispatch(python, source, click));
+                        if (IsDisposed) return;
+                        object content, next;
+                        if (result.TryGetValue("structuredContent", out content)
+                            && ((Dictionary<string, object>)content).TryGetValue("presentation", out next)
+                            && next is Dictionary<string, object>)
+                            display = (Dictionary<string, object>)next;
+                        post(new { jsonrpc = "2.0", id = rpc["id"], result });
+                    }
+                    catch
+                    {
+                        if (!IsDisposed) post(new { jsonrpc = "2.0", id = rpc["id"], error = new {
+                            code = -32000, message = "Office action unconfirmed." }});
+                    }
+                    finally { busy = false; }
+                }
+            }
+            catch { /* Reject malformed messages; never replay a call. */ }
+        };
+    }
+
+    async void LoadPage(string profile, byte[] payload, int count, bool hidden, string python, string source, Action loaded)
     {
         try
         {
+            var envelope = json.Deserialize<Dictionary<string, object>>(Encoding.UTF8.GetString(payload));
+            var document = Encoding.UTF8.GetBytes((string)envelope["document"]);
+            var interactive = envelope.ContainsKey("display") && !String.IsNullOrEmpty(python);
+            var csp = "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
+            if (interactive) csp += "; script-src 'sha256-" + (string)envelope["script_hash"] + "'";
             var env = await CoreWebView2Environment.CreateAsync(null, profile);
             var options = env.CreateCoreWebView2ControllerOptions();
             options.IsInPrivateModeEnabled = true;
@@ -40,7 +116,12 @@ public sealed class CanvasWindow : Form
             controller.Bounds = ClientRectangle;
             controller.IsVisible = true;
             var core = controller.CoreWebView2;
-            core.Settings.IsScriptEnabled = false;
+            core.Settings.IsScriptEnabled = interactive;
+            core.Settings.IsWebMessageEnabled = interactive;
+            if (interactive) {
+                display = (Dictionary<string, object>)envelope["display"];
+                Connect(core, python, source, envelope["instance"]);
+            }
             core.Settings.AreHostObjectsAllowed = false;
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
@@ -50,7 +131,7 @@ public sealed class CanvasWindow : Form
             core.WebResourceRequested += (s, e) => {
                 e.Response = e.Request.Uri == Page
                     ? env.CreateWebResourceResponse(new MemoryStream(document, false), 200, "OK",
-                        "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'none'")
+                        "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: " + csp)
                     : env.CreateWebResourceResponse(null, 403, "Blocked", "");
             };
             ulong navigation = 0;
@@ -66,6 +147,22 @@ public sealed class CanvasWindow : Form
                     string matches = await core.ExecuteScriptAsync(
                         "document.querySelector('main h1') !== null && document.querySelectorAll('article').length === " + count);
                     if (matches != "true") { Close(); return; }
+                    if (interactive) {
+                        for (int i = 0; i < 100; ++i) {
+                            if (await core.ExecuteScriptAsync("document.documentElement.dataset.officeReady === 'true'") == "true") break;
+                            if (i == 99) { Close(); return; }
+                            await Task.Delay(50);
+                        }
+                    }
+                    if (interactive && hidden && Environment.GetEnvironmentVariable("OFFICE_CANVAS_VERIFY_CLICK") == "1") {
+                        // The verifier supplies an unavailable fixture endpoint.
+                        await core.ExecuteScriptAsync("document.querySelector('.mail-actions button').click()");
+                        for (int i = 0; i < 200; ++i) {
+                            if (await core.ExecuteScriptAsync("document.getElementById('action-status').textContent.includes('Office action failed')") == "true") break;
+                            if (i == 199) { Close(); return; }
+                            await Task.Delay(50);
+                        }
+                    }
                     if (!hidden) Show();
                     loaded();
                 }
@@ -88,7 +185,7 @@ public sealed class CanvasWindow : Form
         try { Console.Out.WriteLine(line); Console.Out.Flush(); } catch (IOException) { }
     }
 
-    public static void Run(string sdk, string profile, string id, string digest, int count, bool hidden)
+    public static void Run(string sdk, string profile, string id, string digest, int count, bool hidden, string python, string source)
     {
         var input = new BinaryReader(Console.OpenStandardInput());
         int size = input.ReadInt32();
@@ -131,7 +228,7 @@ public sealed class CanvasWindow : Form
                     timeout.Tick += (s, e) => window.Close();
                     window.FormClosed += (s, e) => context.ExitThread();
                     timeout.Start();
-                    window.BeginInvoke(new Action(() => window.LoadPage(profile, document, count, hidden, () => {
+                    window.BeginInvoke(new Action(() => window.LoadPage(profile, document, count, hidden, python, source, () => {
                         timeout.Stop();
                         using (var writer = new BinaryWriter(shared.CreateViewStream()))
                         {

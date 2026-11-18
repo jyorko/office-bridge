@@ -1,5 +1,9 @@
-"""One script-free reading view for Office results and the MCP App host."""
+"""One script-free renderer with structured actions for capable Office hosts."""
 
+import hashlib
+import hmac
+import json
+import os
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -9,8 +13,11 @@ from uuid import uuid4
 from actions import Response
 from pydantic import BaseModel, Field
 
+from office_bridge.outlook.models import InboxPage, MessageDetail, MessageRef, MessageVersion
+
 MESSAGE_URI = "ui://office-bridge/messages-v1.html"
-MESSAGE_UI = {"ui": {"resourceUri": MESSAGE_URI, "visibility": ["model", "app"]}}
+MESSAGE_UI = {"ui": {"resourceUri": MESSAGE_URI, "visibility": ["model"]}}
+MAIL_ACTION_UI = {"ui": {"resourceUri": MESSAGE_URI, "visibility": ["model", "app"]}}
 T = TypeVar("T")
 
 
@@ -33,10 +40,66 @@ class View(BaseModel):
     cards: Annotated[list[Card], Field(max_length=50)]
 
 
+class ReadMail(BaseModel):
+    rows: Annotated[list[MessageRef | None], Field(max_length=50)]
+
+
+class ReplyToMail(BaseModel):
+    source: MessageRef
+    version: MessageVersion
+
+
+MailActions = ReadMail | ReplyToMail
+
+
+def can_read(ref: MessageRef) -> bool:
+    return bool(ref.store_id.strip()) and any(
+        isinstance(identifier, str) and identifier.strip()
+        for identifier in (ref.entry_id, getattr(ref, "conversation_id", None))
+    )
+
+
+def can_reply(ref: MessageRef, version: MessageVersion) -> bool:
+    if not can_read(ref) or not (ref.entry_id or "").strip():
+        return False
+    if hasattr(version, "content_complete") or getattr(ref, "conversation_id", None):
+        return getattr(version, "content_complete", False) is True and bool(
+            getattr(version, "version_digest", None)
+        )
+    return version.modified_at is not None
+
+
+def can_offer_reply(message: MessageDetail) -> bool:
+    # A WebView2 backend must explicitly confirm draft support. The classic
+    # backend has no capability field and already implements this operation.
+    if hasattr(message.version, "content_complete") and not getattr(
+        message, "can_create_reply_draft", False
+    ):
+        return False
+    return not message.body_truncated and can_reply(message.ref, message.version)
+
+
 class Presentation(BaseModel):
     view_id: str = Field(default_factory=lambda: uuid4().hex)
     view: View
     html: str
+    mail: MailActions | None = None
+    window_proof: str | None = None
+
+    def identity(self) -> str:
+        content = {"view": self.view.model_dump(mode="json")}
+        if self.mail:
+            content["mail"] = self.mail.model_dump(mode="json")
+        return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+    def proof(self) -> str | None:
+        # Only the managed launcher and its workers know this ephemeral key.
+        key = os.environ.get("OFFICE_CANVAS_SIGNING_KEY")
+        if not key or not self.mail:
+            return None
+        return hmac.new(
+            key.encode(), f"{self.view_id}:{self.identity()}".encode(), "sha256"
+        ).hexdigest()
 
 
 class MessageResponse(Response[T], Generic[T]):
@@ -47,9 +110,12 @@ def _template() -> str:
     return Path(__file__).with_name("message_view.html").read_text(encoding="utf-8")
 
 
+def app_script() -> str:
+    return Path(__file__).with_name("message_app.js").read_text(encoding="utf-8")
+
+
 def app_html() -> str:
-    script = Path(__file__).with_name("message_app.js").read_text(encoding="utf-8")
-    return _template().replace("<!--host-->", f"<script>{script}</script>")
+    return _template().replace("<!--host-->", f"<script>{app_script()}</script>")
 
 
 def readable_time(value: str) -> str:
@@ -198,16 +264,39 @@ def message_view(result: dict, *, title: str = "Inbox", scope: str = "") -> View
         )
     if "sender" in result:
         return View(source="Outlook", title="Mail", cards=[_mail(result)])
+    if {"source", "ref", "digest", "recipients", "subject", "body_text"} <= result.keys():
+        facts = {}
+        for label, category in (("To", 1), ("Cc", 2), ("Bcc", 3)):
+            names = [
+                r.get("smtp_address") or r.get("display_name")
+                for r in result["recipients"]
+                if r.get("recipient_type", 1) == category
+            ]
+            if any(names):
+                facts[label] = ", ".join(filter(None, names))
+        return View(
+            source="Outlook",
+            title="Reply draft created",
+            detail="Saved in Outlook Drafts",
+            cards=[
+                Card(
+                    kind="mail",
+                    heading=result["subject"] or "(No subject)",
+                    body=result["body_text"],
+                    facts=facts,
+                )
+            ],
+        )
     if "messages" in result and "chat" in result:
         title = result["chat"].get("title") or result["chat"]["exact_tree_label"]
         cards = [
             Card(
                 kind="chat",
-                heading=m.get("author") or title,
+                heading=m.get("author") or f"Message {index}",
                 timestamp=m.get("time", ""),
                 body=m["text"],
             )
-            for m in result["messages"]
+            for index, m in enumerate(result["messages"], start=1)
         ]
         detail = f"{len(cards)} loaded {'message' if len(cards) == 1 else 'messages'}"
         if result.get("truncated"):
@@ -259,7 +348,15 @@ def with_presentation(response: Response[T], **context: str) -> MessageResponse[
     display = None
     if response.result is not None and not response.error:
         try:
-            display = present(message_view(response.result.model_dump(mode="json"), **context))
+            value = response.result
+            display = present(message_view(value.model_dump(mode="json"), **context))
+            if isinstance(value, InboxPage):
+                rows = [item.ref if can_read(item.ref) else None for item in value.items]
+                if any(rows):
+                    display.mail = ReadMail(rows=rows)
+            elif isinstance(value, MessageDetail) and can_offer_reply(value):
+                display.mail = ReplyToMail(source=value.ref, version=value.version)
+            display.window_proof = display.proof()
         except Exception:
             # Rendering is advisory even after a successful, non-repeatable send.
             pass

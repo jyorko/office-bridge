@@ -20,7 +20,12 @@ from office_bridge.outlook.models import (
     ReplyDraft,
     SendReceipt,
 )
-from office_bridge.presentation import MESSAGE_UI, MessageResponse, with_presentation
+from office_bridge.presentation import (
+    MAIL_ACTION_UI,
+    MESSAGE_UI,
+    MessageResponse,
+    with_presentation,
+)
 
 
 @tool(read_only_hint=True, open_world_hint=False, meta=MESSAGE_UI)
@@ -37,7 +42,7 @@ def outlook_inbox_list(limit: Limit = 20, unread_only: bool = False) -> MessageR
     )
 
 
-@tool(read_only_hint=True, open_world_hint=False, meta=MESSAGE_UI)
+@tool(read_only_hint=True, open_world_hint=False, meta=MAIL_ACTION_UI)
 def outlook_get_message(message: MessageRef) -> MessageResponse[MessageDetail]:
     """Read mail with body capped at 20000 characters.
 
@@ -68,13 +73,19 @@ def outlook_search_inbox(query: InboxQuery, limit: Limit = 20) -> MessageRespons
     )
 
 
-@tool(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
+@tool(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=False,
+    meta=MAIL_ACTION_UI,
+)
 def outlook_create_reply_draft(
     source: MessageRef,
     body_text: Text,
     expected_source: MessageVersion,
     reply_all: bool = False,
-) -> Response[ReplyDraft]:
+) -> MessageResponse[ReplyDraft]:
     """Save an attachment-free, plain-text reply or reply-all draft. Never sends.
 
     Args:
@@ -83,13 +94,15 @@ def outlook_create_reply_draft(
         expected_source: Unchanged version returned by the last mail read.
         reply_all: Include the source message's other recipients when true.
     """
-    return desktop.run(
-        "create_reply_draft",
-        ReplyDraft,
-        source=source,
-        body_text=body_text,
-        expected_source=expected_source,
-        reply_all=reply_all,
+    return with_presentation(
+        desktop.run(
+            "create_reply_draft",
+            ReplyDraft,
+            source=source,
+            body_text=body_text,
+            expected_source=expected_source,
+            reply_all=reply_all,
+        )
     )
 
 

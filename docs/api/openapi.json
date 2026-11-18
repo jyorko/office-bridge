@@ -351,6 +351,149 @@
                             "html": {
                               "type": "string",
                               "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
                             }
                           },
                           "type": "object",
@@ -764,6 +907,149 @@
                             "html": {
                               "type": "string",
                               "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
                             }
                           },
                           "type": "object",
@@ -1186,6 +1472,149 @@
                             "html": {
                               "type": "string",
                               "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
                             }
                           },
                           "type": "object",
@@ -1465,6 +1894,280 @@
                       ],
                       "title": "Error",
                       "description": "The error message if the action failed for some reason"
+                    },
+                    "presentation": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "view_id": {
+                              "type": "string",
+                              "title": "View Id"
+                            },
+                            "view": {
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Outlook",
+                                    "Teams",
+                                    "Office"
+                                  ],
+                                  "title": "Source",
+                                  "default": "Office"
+                                },
+                                "title": {
+                                  "type": "string",
+                                  "title": "Title",
+                                  "default": "Messages"
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "title": "Detail",
+                                  "default": ""
+                                },
+                                "empty": {
+                                  "type": "string",
+                                  "title": "Empty",
+                                  "default": "No messages found"
+                                },
+                                "cards": {
+                                  "items": {
+                                    "properties": {
+                                      "kind": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "enum": [
+                                              "mail",
+                                              "chat",
+                                              "receipt"
+                                            ]
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Kind"
+                                      },
+                                      "heading": {
+                                        "type": "string",
+                                        "title": "Heading"
+                                      },
+                                      "detail": {
+                                        "type": "string",
+                                        "title": "Detail",
+                                        "default": ""
+                                      },
+                                      "body": {
+                                        "type": "string",
+                                        "title": "Body",
+                                        "default": ""
+                                      },
+                                      "unread": {
+                                        "anyOf": [
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "title": "Unread"
+                                      },
+                                      "timestamp": {
+                                        "type": "string",
+                                        "title": "Timestamp",
+                                        "default": ""
+                                      },
+                                      "facts": {
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        },
+                                        "type": "object",
+                                        "title": "Facts"
+                                      },
+                                      "body_truncated": {
+                                        "type": "boolean",
+                                        "title": "Body Truncated",
+                                        "default": false
+                                      }
+                                    },
+                                    "type": "object",
+                                    "required": [
+                                      "heading"
+                                    ],
+                                    "title": "Card"
+                                  },
+                                  "type": "array",
+                                  "maxItems": 50,
+                                  "title": "Cards"
+                                }
+                              },
+                              "type": "object",
+                              "required": [
+                                "cards"
+                              ],
+                              "title": "View"
+                            },
+                            "html": {
+                              "type": "string",
+                              "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "view",
+                            "html"
+                          ],
+                          "title": "Presentation"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "type": "object",
@@ -1756,6 +2459,149 @@
                             "html": {
                               "type": "string",
                               "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
                             }
                           },
                           "type": "object",
@@ -2595,6 +3441,149 @@
                             "html": {
                               "type": "string",
                               "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
                             }
                           },
                           "type": "object",
@@ -6389,6 +7378,149 @@
                             "html": {
                               "type": "string",
                               "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
                             }
                           },
                           "type": "object",
@@ -6768,6 +7900,149 @@
                             "html": {
                               "type": "string",
                               "title": "Html"
+                            },
+                            "mail": {
+                              "anyOf": [
+                                {
+                                  "properties": {
+                                    "rows": {
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "properties": {
+                                              "entry_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Entry Id"
+                                              },
+                                              "store_id": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "minLength": 1,
+                                                "title": "Store Id"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "type": "object",
+                                            "required": [
+                                              "entry_id",
+                                              "store_id"
+                                            ],
+                                            "title": "MessageRef"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "title": "Rows"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "rows"
+                                  ],
+                                  "title": "ReadMail"
+                                },
+                                {
+                                  "properties": {
+                                    "source": {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    "version": {
+                                      "properties": {
+                                        "modified_at": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "title": "Modified At"
+                                        },
+                                        "subject": {
+                                          "type": "string",
+                                          "title": "Subject"
+                                        },
+                                        "unread": {
+                                          "type": "boolean",
+                                          "title": "Unread"
+                                        },
+                                        "folder_entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Folder Entry Id"
+                                        },
+                                        "flagged": {
+                                          "type": "boolean",
+                                          "title": "Flagged"
+                                        },
+                                        "importance": {
+                                          "type": "string",
+                                          "enum": [
+                                            "low",
+                                            "normal",
+                                            "high"
+                                          ],
+                                          "title": "Importance"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "modified_at",
+                                        "subject",
+                                        "unread",
+                                        "folder_entry_id",
+                                        "flagged",
+                                        "importance"
+                                      ],
+                                      "title": "MessageVersion"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "required": [
+                                    "source",
+                                    "version"
+                                  ],
+                                  "title": "ReplyToMail"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Mail"
+                            },
+                            "window_proof": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Window Proof"
                             }
                           },
                           "type": "object",
@@ -10591,6 +11866,149 @@
                     "view_id": {
                       "type": "string",
                       "title": "View Id"
+                    },
+                    "mail": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "rows": {
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "properties": {
+                                      "entry_id": {
+                                        "type": "string",
+                                        "maxLength": 4096,
+                                        "minLength": 1,
+                                        "title": "Entry Id"
+                                      },
+                                      "store_id": {
+                                        "type": "string",
+                                        "maxLength": 4096,
+                                        "minLength": 1,
+                                        "title": "Store Id"
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "type": "object",
+                                    "required": [
+                                      "entry_id",
+                                      "store_id"
+                                    ],
+                                    "title": "MessageRef"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "type": "array",
+                              "maxItems": 50,
+                              "title": "Rows"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "rows"
+                          ],
+                          "title": "ReadMail"
+                        },
+                        {
+                          "properties": {
+                            "source": {
+                              "properties": {
+                                "entry_id": {
+                                  "type": "string",
+                                  "maxLength": 4096,
+                                  "minLength": 1,
+                                  "title": "Entry Id"
+                                },
+                                "store_id": {
+                                  "type": "string",
+                                  "maxLength": 4096,
+                                  "minLength": 1,
+                                  "title": "Store Id"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "entry_id",
+                                "store_id"
+                              ],
+                              "title": "MessageRef"
+                            },
+                            "version": {
+                              "properties": {
+                                "modified_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "title": "Modified At"
+                                },
+                                "subject": {
+                                  "type": "string",
+                                  "title": "Subject"
+                                },
+                                "unread": {
+                                  "type": "boolean",
+                                  "title": "Unread"
+                                },
+                                "folder_entry_id": {
+                                  "type": "string",
+                                  "maxLength": 4096,
+                                  "minLength": 1,
+                                  "title": "Folder Entry Id"
+                                },
+                                "flagged": {
+                                  "type": "boolean",
+                                  "title": "Flagged"
+                                },
+                                "importance": {
+                                  "type": "string",
+                                  "enum": [
+                                    "low",
+                                    "normal",
+                                    "high"
+                                  ],
+                                  "title": "Importance"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "modified_at",
+                                "subject",
+                                "unread",
+                                "folder_entry_id",
+                                "flagged",
+                                "importance"
+                              ],
+                              "title": "MessageVersion"
+                            }
+                          },
+                          "type": "object",
+                          "required": [
+                            "source",
+                            "version"
+                          ],
+                          "title": "ReplyToMail"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Mail"
+                    },
+                    "window_proof": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Window Proof"
                     }
                   },
                   "type": "object",
@@ -10730,6 +12148,150 @@
                         "type": "array",
                         "maxItems": 50,
                         "title": "Cards"
+                      },
+                      "mail": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "rows": {
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "properties": {
+                                        "entry_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Entry Id"
+                                        },
+                                        "store_id": {
+                                          "type": "string",
+                                          "maxLength": 4096,
+                                          "minLength": 1,
+                                          "title": "Store Id"
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "entry_id",
+                                        "store_id"
+                                      ],
+                                      "title": "MessageRef"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "type": "array",
+                                "maxItems": 50,
+                                "title": "Rows"
+                              }
+                            },
+                            "type": "object",
+                            "required": [
+                              "rows"
+                            ],
+                            "title": "ReadMail"
+                          },
+                          {
+                            "properties": {
+                              "source": {
+                                "properties": {
+                                  "entry_id": {
+                                    "type": "string",
+                                    "maxLength": 4096,
+                                    "minLength": 1,
+                                    "title": "Entry Id"
+                                  },
+                                  "store_id": {
+                                    "type": "string",
+                                    "maxLength": 4096,
+                                    "minLength": 1,
+                                    "title": "Store Id"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "type": "object",
+                                "required": [
+                                  "entry_id",
+                                  "store_id"
+                                ],
+                                "title": "MessageRef"
+                              },
+                              "version": {
+                                "properties": {
+                                  "modified_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "title": "Modified At"
+                                  },
+                                  "subject": {
+                                    "type": "string",
+                                    "title": "Subject"
+                                  },
+                                  "unread": {
+                                    "type": "boolean",
+                                    "title": "Unread"
+                                  },
+                                  "folder_entry_id": {
+                                    "type": "string",
+                                    "maxLength": 4096,
+                                    "minLength": 1,
+                                    "title": "Folder Entry Id"
+                                  },
+                                  "flagged": {
+                                    "type": "boolean",
+                                    "title": "Flagged"
+                                  },
+                                  "importance": {
+                                    "type": "string",
+                                    "enum": [
+                                      "low",
+                                      "normal",
+                                      "high"
+                                    ],
+                                    "title": "Importance"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "type": "object",
+                                "required": [
+                                  "modified_at",
+                                  "subject",
+                                  "unread",
+                                  "folder_entry_id",
+                                  "flagged",
+                                  "importance"
+                                ],
+                                "title": "MessageVersion"
+                              }
+                            },
+                            "type": "object",
+                            "required": [
+                              "source",
+                              "version"
+                            ],
+                            "title": "ReplyToMail"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Mail"
+                      },
+                      "window_proof": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Window Proof"
                       }
                     },
                     "type": "object",
@@ -10737,7 +12299,7 @@
                       "cards"
                     ],
                     "title": "View",
-                    "description": "The same structured view returned by the Office action. No Office operation is repeated."
+                    "description": "The same structured view. Include the presentation's mail and window_proof fields\nwhen supplied to enable its verified mail controls."
                   }
                 },
                 "type": "object",
