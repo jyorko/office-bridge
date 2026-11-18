@@ -27,14 +27,25 @@ HOST = """<iframe sandbox="allow-scripts" title="Office" style="width:100%;heigh
 <script>
 const frame = document.querySelector('iframe');
 window.calls = [];
+window.openRequests = [];
+window.openLinksEnabled = false;
+window.setTheme = theme => frame.contentWindow.postMessage({
+  jsonrpc:'2.0', method:'ui/notifications/host-context-changed', params:{theme}
+}, '*');
 window.deliver = params => frame.contentWindow.postMessage({jsonrpc:'2.0', method:'ui/notifications/tool-result', params}, '*');
 window.addEventListener('message', ({source, data}) => {
   if (source !== frame.contentWindow || data?.jsonrpc !== '2.0') return;
   if (data.method === 'ui/initialize') source.postMessage({jsonrpc:'2.0', id:data.id, result:{
-    protocolVersion:data.params.protocolVersion, hostCapabilities:{serverTools:{}}, hostContext:{theme:'dark'},
+    protocolVersion:data.params.protocolVersion, hostCapabilities:{
+      serverTools:{}, ...(window.openLinksEnabled ? {openLinks:{}} : {})
+    }, hostContext:{theme:'dark'},
     hostInfo:{name:'Synthetic host', version:'1'}
   }}, '*');
   if (data.method === 'ui/notifications/initialized') window.initialized = true;
+  if (data.method === 'ui/open-link') {
+    window.openRequests.push(data.params);
+    source.postMessage({jsonrpc:'2.0', id:data.id, result:{}}, '*');
+  }
   if (data.method === 'tools/call') {
     window.calls.push(data.params);
     const result = window.nextResult || {structuredContent:{opened:true,view_id:data.params.arguments.view_id}};
@@ -323,7 +334,11 @@ def check_rich_mail_ui(page, app):
                 "heading": "Scoring guide updates",
                 "detail": "Alex Morgan",
                 "body": "Please review the changes.\n\nQuestion\nChange\n2.2\nRevised response",
-                "body_html": "<p>Please review the changes.</p><p>&nbsp;</p>"
+                "body_html": "<h2>Review guide</h2>"
+                "<p>Please review the changes with <code>review()</code>. "
+                '<a href="https://example.invalid/review">Open review</a></p>'
+                "<ul><li>Check the summary</li></ul>"
+                "<blockquote>Keep the original notes.</blockquote>"
                 "<table><thead><tr><th>Question</th><th>Change</th></tr></thead>"
                 "<tbody><tr><td>2.2</td><td><strong>Revised response</strong></td></tr>"
                 "</tbody></table><script>window.mailScriptRan=true</script>"
@@ -336,16 +351,78 @@ def check_rich_mail_ui(page, app):
     app.get_by_role("columnheader", name="Question").wait_for()
     assert app.get_by_role("cell", name="2.2").is_visible()
     assert app.get_by_role("cell", name="Revised response").is_visible()
-    assert app.locator(".mail-body p").count() == 1
+    assert app.get_by_role("heading", name="Scoring guide updates", exact=True).is_visible()
+    assert app.get_by_role("heading", name="Review guide", exact=True).is_visible()
+    assert app.locator(".mail-body li").count() == 1
+    assert app.locator(".mail-body blockquote").is_visible()
+    assert app.locator(".mail-body code").text_content() == "review()"
     assert app.locator(".mail-body script,.mail-body img,.mail-body [style]").count() == 0
-    assert app.locator(".mail-body").evaluate("(node) => node.getBoundingClientRect().height < 230")
+    assert not app.locator(".mail-body a").count()
+    assert "https://example.invalid/review" in app.locator(".link-text").text_content()
+    assert app.locator(".mail-body").evaluate("(node) => node.getBoundingClientRect().height < 400")
     for width in (1100, 360):
         page.set_viewport_size({"width": width, "height": 800})
         assert app.locator("html").evaluate("(node) => node.scrollWidth <= node.clientWidth")
+        page.screenshot(
+            path=str(
+                Path(__file__).resolve().parents[1]
+                / f".state/mail-rendering-{width}-dark.png"
+            ),
+            full_page=True,
+        )
+    page.set_viewport_size({"width": 1100, "height": 800})
+    page.evaluate("window.setTheme('light')")
+    page.wait_for_timeout(100)
+    page.set_viewport_size({"width": 360, "height": 800})
+    page.screenshot(
+        path=str(Path(__file__).resolve().parents[1] / ".state/mail-rendering-360-light.png"),
+        full_page=True,
+    )
     page.set_viewport_size({"width": 1100, "height": 800})
     page.screenshot(
-        path=str(Path(__file__).resolve().parents[1] / ".state/mail-rendering-synthetic.png")
+        path=str(Path(__file__).resolve().parents[1] / ".state/mail-rendering-1100-light.png"),
+        full_page=True,
     )
+
+
+def check_host_open_links(browser):
+    page = browser.new_page()
+    page.set_content(HOST)
+    page.evaluate("window.openLinksEnabled=true")
+    page.locator("iframe").evaluate("(frame, html) => frame.srcdoc = html", app_html())
+    page.wait_for_function("window.initialized")
+    app = page.frame_locator("iframe")
+    display = present(
+        View(
+            source="Outlook",
+            cards=[
+                {
+                    "kind": "mail",
+                    "heading": "Linked note",
+                    "body": "Open note",
+                    "body_html": '<p><a href="https://example.invalid/selected">Open note</a></p>',
+                }
+            ],
+        )
+    ).model_dump(mode="json")
+    page.evaluate("window.deliver", {"structuredContent": {"presentation": display}})
+    try:
+        app.locator(".mail-body").wait_for(timeout=3000)
+    except Exception as error:
+        raise AssertionError(
+            f"synthetic app did not render linked mail: {app.locator('body').inner_text()}"
+        ) from error
+    if not app.locator(".mail-body a").count():
+        raise AssertionError(
+            f"openLinks capability did not retain an anchor: {app.locator('.mail-body').inner_html()}"
+        )
+    link = app.get_by_role("link", name="Open note")
+    link.click()
+    assert page.evaluate("window.openRequests") == [
+        {"url": "https://example.invalid/selected"}
+    ]
+    assert not page.evaluate("window.calls")
+    page.close()
 
 
 def check_receipt_ui(page, app):
@@ -371,15 +448,22 @@ def check_receipt_ui(page, app):
         assert app.get_by_text("Alex Morgan", exact=True).is_visible()
         assert not app.get_by_role("button", name="Open in window").count()
         if len(text) > 400:
-            app.get_by_text("Full message", exact=True).click()
+            assert not app.get_by_text("Full message", exact=True).count()
         if text:
             assert app.locator(".body").is_visible()
             assert app.locator(".body").text_content() == text
+            if len(text) > 400:
+                assert app.locator(".body").evaluate("(node) => node.textContent.length > 400")
         else:
             assert app.get_by_text("Message text is unavailable in this receipt.").is_visible()
         for width in (1100, 360):
             page.set_viewport_size({"width": width, "height": 800})
             assert app.locator("html").evaluate("(node) => node.scrollWidth <= node.clientWidth")
+        if len(text) > 400:
+            page.screenshot(
+                path=str(Path(__file__).resolve().parents[1] / ".state/receipt-rendering-360-dark.png"),
+                full_page=True,
+            )
     assert page.evaluate("window.calls.length") == calls_before
     page.set_viewport_size({"width": 1100, "height": 800})
 
@@ -482,6 +566,7 @@ def check_ui(resource, displays):
             assert not app.get_by_role("button").count()
         check_conversation_read(page, app)
         check_rich_mail_ui(page, app)
+        check_host_open_links(browser)
         check_receipt_ui(page, app)
         for outcome in ("saved", "error", "timeout"):
             mail_page = browser.new_page(viewport={"width": 360, "height": 800})
@@ -500,6 +585,22 @@ def check_ui(resource, displays):
                 outcome=outcome,
             )
             mail_page.close()
+        browser.close()
+
+
+def check_synthetic_reader():
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(channel="msedge", headless=True)
+        page = browser.new_page(viewport={"width": 1100, "height": 800})
+        page.set_content(HOST)
+        page.locator("iframe").evaluate(
+            "(frame, html) => frame.srcdoc = html", app_html()
+        )
+        page.wait_for_function("window.initialized")
+        app = page.frame_locator("iframe")
+        check_rich_mail_ui(page, app)
+        check_host_open_links(browser)
+        check_receipt_ui(page, app)
         browser.close()
 
 
@@ -562,6 +663,9 @@ if __name__ == "__main__":
                 start_viewer(Presentation.model_validate_json(sys.stdin.read()), verify_hidden=True)
             )
         )
+    elif "--synthetic-reader-only" in sys.argv:
+        check_synthetic_reader()
+        print("Verified synthetic reader rendering, safe links, verified mentions, and desktop/mobile layouts without Office actions.")
     else:
         resource, displays = load_results()
         check_ui(resource, displays)

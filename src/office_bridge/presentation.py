@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -136,7 +137,7 @@ def readable_time(value: str) -> str:
     return f"{date:%b} {date.day}, {date.year} · {hour}{offset}"
 
 
-def _article(card: Card, *, listing: bool) -> str:
+def _article(card: Card, *, listing: bool, promoted: bool = False) -> str:
     kind = card.kind or "message"
     heading = f"<h2>{escape(card.heading)}</h2>"
     who = f'<p class="detail">{escape(card.detail)}</p>' if card.detail else ""
@@ -148,16 +149,35 @@ def _article(card: Card, *, listing: bool) -> str:
     )
     unread = '<span class="unread">Unread</span>' if card.unread else ""
     header = f'<div class="row-head">{who}{when}{unread}</div>'
-    facts = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in card.facts.items())
+    fact_parts = []
+    for key, value in card.facts.items():
+        if kind == "receipt" and key == "Verified mentions":
+            chips = "".join(
+                f'<span class="verified-mention">{escape(name.strip())}</span>'
+                for name in value.split(",")
+                if name.strip()
+            )
+            fact_parts.append(f"<dt>{escape(key)}</dt><dd>{chips}</dd>")
+        else:
+            fact_parts.append(f"<dt>{escape(key)}</dt><dd>{escape(value)}</dd>")
+    facts = "".join(fact_parts)
     content = f"<dl>{facts}</dl>" if facts else ""
-    if card.body:
+    if card.body or (kind == "mail" and card.body_html):
         text = readable_plain_mail(card.body) if kind == "mail" else card.body
+        mentions = (
+            [value.strip() for value in card.facts.get("Verified mentions", "").split(",")]
+            if kind == "receipt"
+            else []
+        )
+        receipt_body = _verified_mentions_html(card.body, mentions) if mentions else escape(card.body)
         body = (
             f'<div class="body mail-body">{card.body_html}</div>'
             if kind == "mail" and card.body_html
+            else f'<div class="body receipt-body">{receipt_body}</div>'
+            if kind == "receipt"
             else f'<div class="body">{escape(text)}</div>'
         )
-        if kind in {"chat", "receipt"} and (len(card.body) > 400 or card.body.count("\n") > 6):
+        if kind == "chat" and (len(card.body) > 400 or card.body.count("\n") > 6):
             preview = "\n".join(card.body.splitlines()[:3])[:280].rstrip()
             body = (
                 f'<p class="preview">{escape(preview)}…</p><details class="disclosure">'
@@ -173,13 +193,35 @@ def _article(card: Card, *, listing: bool) -> str:
             f'<div class="expanded">{content}</div></details>'
         )
     else:
-        row = header + heading + content
+        row = header + ("" if promoted else heading) + content
     if kind == "chat":
         initials = "".join(word[0] for word in card.heading.split()[:2])
         row = f'<span class="avatar" aria-hidden="true">{escape(initials)}</span><div>{row}</div>'
     return (
         f'<article class="{kind}" data-unread="{str(card.unread is True).lower()}">{row}</article>'
     )
+
+
+def _verified_mentions_html(body: str, mentions: list[str]) -> str:
+    matches = []
+    for mention in mentions:
+        if not mention:
+            continue
+        pattern = re.compile(rf"(?<!\w){re.escape(mention)}(?!\w)")
+        occurrences = list(pattern.finditer(body))
+        if len(occurrences) == 1:
+            matches.append((occurrences[0].start(), occurrences[0].end()))
+    matches.sort()
+    parts = []
+    cursor = 0
+    for start, end in matches:
+        if start < cursor:
+            continue
+        parts.append(escape(body[cursor:start]))
+        parts.append(f'<span class="verified-mention">{escape(body[start:end])}</span>')
+        cursor = end
+    parts.append(escape(body[cursor:]))
+    return "".join(parts)
 
 
 def present(view: View) -> Presentation:
@@ -194,12 +236,21 @@ def present(view: View) -> Presentation:
         "Outlook": "Microsoft Outlook",
         "Office": "Office Bridge",
     }[view.source]
+    listing = len(view.cards) > 1 and all(card.kind == "mail" for card in view.cards)
+    promoted = len(view.cards) == 1 and (
+        view.cards[0].kind == "receipt"
+        or (view.source == "Outlook" and view.cards[0].kind == "mail" and not listing)
+    )
+    title = view.cards[0].heading if promoted else view.title
+    source_line = (
+        f"{source} · {view.title}"
+        if receipt or (promoted and view.source == "Outlook" and view.title != "Mail")
+        else source
+    )
     scope = f'<p class="scope">{escape(view.detail)}</p>' if view.detail else ""
     header = (
-        f'<header class="mast {mode}"><div class="mast-copy"><p class="source">{source}</p>'
-        f"<h1>{escape(view.title)}</h1>{scope}</div>"
-        '<div class="glyph" aria-hidden="true"><i class="back"></i><i class="paper"></i>'
-        '<i class="front"></i></div></header>'
+        f'<header class="mast {mode}"><div class="mast-copy"><p class="source">{escape(source_line)}</p>'
+        f"<h1>{escape(title)}</h1>{scope}</div></header>"
     )
     unread = sum(card.unread is True for card in view.cards)
     controls = ""
@@ -208,8 +259,10 @@ def present(view: View) -> Presentation:
             f'<label class="filter"><input type="checkbox">Unread only '
             f'<span class="count">{unread}</span></label>'
         )
-    listing = len(view.cards) > 1 and all(card.kind == "mail" for card in view.cards)
-    articles = "".join(_article(card, listing=listing) for card in view.cards)
+    articles = "".join(
+        _article(card, listing=listing and not promoted, promoted=promoted)
+        for card in view.cards
+    )
     content = (
         header
         + controls
