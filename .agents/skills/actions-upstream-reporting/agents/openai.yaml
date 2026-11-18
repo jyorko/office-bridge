@@ -1,0 +1,3 @@
+interface:
+  display_name: "Actions Upstream Reporting"
+  short_description: "Triage Action Server failures and report confirmed bugs"

@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-NAMES = ("office-bridge-mcp", "verify-office-bridge-safety")
+NAMES = ("office-bridge-mcp", "verify-office-bridge-safety", "actions-upstream-reporting")
 MANIFEST = ".office-bridge-managed.json"
 
 
