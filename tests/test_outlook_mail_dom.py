@@ -125,6 +125,18 @@ def test_scan_stops_when_inbox_identity_is_ambiguous(page):
     assert result["state"] == "inbox_ambiguous"
 
 
+def test_reader_opens_the_current_viewport_before_advancing_it(page):
+    set_inbox(page)
+    page.locator('[data-convid="conversation-001"]').evaluate(
+        "(row) => row.addEventListener('click', () => row.dataset.opened = 'true')"
+    )
+    result = run_script(page, {
+        "phase": "scan", "step": "next", "open_conversation_id": "conversation-001",
+    })
+    assert result["state"] == "opening"
+    assert page.locator('[data-convid="conversation-001"]').get_attribute("data-opened") == "true"
+
+
 def test_open_and_read_require_the_exact_loaded_message_reference(page):
     set_inbox(page)
     opened = run_script(page, {"phase": "open", "conversation_id": "conversation-001"})

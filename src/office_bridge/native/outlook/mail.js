@@ -194,6 +194,19 @@
     const matches = messageRows().filter((row) => rowId(row) === id);
     return matches.length === 1 ? matches[0] : null;
   };
+  const openRow = (row, conversation) => {
+    const priorBody = Array.from(document.querySelectorAll('[role="document"]')).filter(visible);
+    window.__officeOutlookReadSelection = {
+      conversation,
+      wasSelected: row.getAttribute("aria-selected") === "true",
+      priorBody: priorBody.length === 1 ? priorBody[0] : null,
+      priorFingerprint: priorBody.length === 1 ? bodyFingerprint(priorBody[0]) : "",
+      fingerprint: "",
+      stableSince: performance.now(),
+    };
+    if (!window.__officeOutlookReadSelection.wasSelected) row.click();
+    return { state: "opening", conversation_id: conversation };
+  };
   const bodyFingerprint = (element) => {
     const text = element ? element.innerText || element.textContent || "" : "";
     let hash = 2166136261;
@@ -732,6 +745,11 @@
     return {
       state,
       selected_row_count: rows.length,
+      mail_row_count: messageRows().length,
+      duplicate_conversation_row_count: messageRows().length -
+        new Set(messageRows().map(rowId)).size,
+      read_selection_conversation_row_count: messageRows().filter(row =>
+        rowId(row) === window.__officeOutlookReadSelection?.conversation).length,
       body_region_count: regions.length,
       safe_ancestor_depth: ancestorDepth,
       identity_attribute_counts: attributeCounts,
@@ -801,6 +819,12 @@
       folderItems(folderName)[0].click();
       return { state: "navigating_inbox", rows: [] };
     }
+    if (request.open_conversation_id) {
+      if (hasComposer()) return { state: "draft_exists" };
+      const matches = messageRows().filter(row => rowId(row) === request.open_conversation_id);
+      if (matches.length > 1) return { state: "message_identity_ambiguous" };
+      if (matches.length === 1) return openRow(matches[0], request.open_conversation_id);
+    }
     const container = scrollContainer();
     let scrollAdvanced = false;
     if (request.step === "start" && container) {
@@ -836,24 +860,14 @@
       return {
         state: messageRows().length ? "not_visible" : "message_not_found",
       };
-    const priorBody = Array.from(document.querySelectorAll('[role="document"]'))
-      .filter(visible);
-    window.__officeOutlookReadSelection = {
-      conversation: request.conversation_id,
-      wasSelected: row.getAttribute("aria-selected") === "true",
-      priorBody: priorBody.length === 1 ? priorBody[0] : null,
-      priorFingerprint: priorBody.length === 1 ? bodyFingerprint(priorBody[0]) : "",
-      fingerprint: "",
-      stableSince: performance.now(),
-    };
-    row.click();
-    return { state: "opening", conversation_id: request.conversation_id };
+    return openRow(row, request.conversation_id);
   }
 
   if (request.phase === "read") {
     const row = getUniqueRow(request.conversation_id);
-    if (!row) return { state: "message_not_found" };
-    const active = row.getAttribute("aria-selected") === "true" ||
+    if (!row && !request.exact_message_navigation) return { state: "message_not_found" };
+    const active = request.exact_message_navigation ||
+      row.getAttribute("aria-selected") === "true" ||
       row.getAttribute("aria-current") === "true";
     if (!active) return { state: "waiting" };
     const regions = Array.from(
@@ -928,7 +942,7 @@
       };
     }
     const messageId = identities.length === 1 ? identities[0] : "";
-    const summary = readRow(row);
+    const summary = row ? readRow(row) : null;
     return {
       state: "read",
       item: summary,
@@ -1091,7 +1105,7 @@
   if (request.phase === "attachment_list" || request.phase === "download_attachment") {
     if (hasComposer()) return { state: "draft_exists" };
     const row = getUniqueRow(request.conversation_id);
-    if (!row || row.getAttribute("aria-selected") !== "true")
+    if ((!row || row.getAttribute("aria-selected") !== "true") && !request.exact_message_navigation)
       return { state: "message_not_found" };
     const bodies = Array.from(document.querySelectorAll('[role="document"]')).filter(visible);
     if (bodies.length !== 1) return { state: "message_identity_ambiguous" };

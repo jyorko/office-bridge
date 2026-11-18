@@ -875,6 +875,10 @@ public sealed class OutlookSession : ApplicationContext
                 { "subject", TextField(map, "Subject").Length <= 1000 ? TextField(map, "Subject") : "" },
                 { "sent_at", TextField(map, "DateTimeSent").Length <= 40 ? TextField(map, "DateTimeSent") : "" },
                 { "received_at", TextField(map, "DateTimeReceived").Length <= 40 ? TextField(map, "DateTimeReceived") : "" },
+                { "unread", Field(map, "IsRead") is bool && !(bool)map["IsRead"] },
+                { "flagged", TextField(Field(map, "Flag") as Dictionary<string, object>,
+                    "FlagStatus").Equals("Flagged", StringComparison.OrdinalIgnoreCase) },
+                { "importance", TextField(map, "Importance").ToLowerInvariant() },
                 { "body_hashes", bodyTexts.Select(BodyDigest).ToList() },
                 { "body_fingerprints", bodyTexts.Select(BodyFingerprint).ToList() },
                 { "attachments", ObservedAttachments(map) }
@@ -1968,11 +1972,13 @@ public sealed class OutlookSession : ApplicationContext
         SetStage("message_open");
         DateTime deadline = DateTime.UtcNow.AddSeconds(12);
         string scanStep = "start";
-        while (DateTime.UtcNow < deadline)
+        for (int step = 0; step < 50 && DateTime.UtcNow < deadline; step++)
         {
             var ready = await ExecuteMailScript(new Dictionary<string, object> {
-                { "phase", "scan" }, { "step", scanStep }, { "folder", folder }
+                { "phase", "scan" }, { "step", scanStep }, { "folder", folder },
+                { "open_conversation_id", conversation }
             });
+            if (TextField(ready, "state") == "opening") return;
             if (TextField(ready, "state") == "navigating_inbox")
             {
                 await Task.Delay(200);
@@ -1981,31 +1987,10 @@ public sealed class OutlookSession : ApplicationContext
             if (TextField(ready, "state") != "listed" ||
                 !BoolField(ready, "inbox_selected"))
                 throw new InvalidOperationException(TextField(ready, "state"));
-            // Outlook virtualizes the list. Wait for the reset before looking
-            // for the row; a full scan followed by restoring scroll can lose it.
-            await Task.Delay(200);
-            break;
-        }
-        for (int step = 0; step < 50; step++)
-        {
-            if (DateTime.UtcNow >= deadline)
+            if (scanStep == "next" && BoolField(ready, "at_bottom") &&
+                !BoolField(ready, "scroll_advanced"))
                 throw new InvalidOperationException("message_not_found");
-            var opened = await ExecuteMailScript(new Dictionary<string, object> {
-                { "phase", "open" }, { "conversation_id", conversation }
-            });
-            string state = TextField(opened, "state");
-            if (state == "opening") return;
-            if (state != "not_visible")
-                throw new InvalidOperationException(state);
-            var scroll = await ExecuteMailScript(new Dictionary<string, object> {
-                { "phase", "scan" }, { "step", "next" }, { "folder", folder }
-            });
-            if (TextField(scroll, "state") != "listed" ||
-                !BoolField(scroll, "inbox_selected"))
-                throw new InvalidOperationException("not_ready");
-            if (BoolField(scroll, "at_bottom") &&
-                !BoolField(scroll, "scroll_advanced"))
-                throw new InvalidOperationException("message_not_found");
+            scanStep = "next";
             await Task.Delay(150);
         }
         throw new InvalidOperationException("message_not_found");
@@ -2024,7 +2009,16 @@ public sealed class OutlookSession : ApplicationContext
             throw new InvalidOperationException("invalid_request");
         if (String.IsNullOrWhiteSpace(conversation))
             throw new InvalidOperationException("message_not_found");
-        await OpenConversation(conversation, folder);
+        bool exactNavigation = !String.IsNullOrEmpty(requestedMessage);
+        if (exactNavigation)
+        {
+            var current = new Uri(controller.CoreWebView2.Source);
+            observedConversations.Remove(conversation);
+            controller.CoreWebView2.Navigate("https://" + current.Host +
+                "/mail/id/" + Uri.EscapeDataString(requestedMessage));
+            await Task.Delay(500);
+        }
+        else await OpenConversation(conversation, folder);
         SetStage("message_dom_read");
         DateTime deadline = DateTime.UtcNow.AddSeconds(8);
         Dictionary<string, object> result = null;
@@ -2037,13 +2031,16 @@ public sealed class OutlookSession : ApplicationContext
             result = await ExecuteMailScript(new Dictionary<string, object> {
                 { "phase", "read" }, { "conversation_id", conversation },
                 { "body_fingerprints", fingerprints },
+                { "exact_message_navigation", exactNavigation },
                 { "message_id", String.IsNullOrEmpty(requestedMessage) ? null : requestedMessage }
             });
             string state = TextField(result, "state");
             List<Dictionary<string, object>> available;
             string bodyHash = BodyDigest(TextField(result, "body_binding_text"));
             if (state == "read" && observedConversations.TryGetValue(conversation, out available) &&
-                available.Any(item => ((List<string>)item["body_hashes"]).Contains(bodyHash))) break;
+                available.Any(item => ((List<string>)item["body_hashes"]).Contains(bodyHash) &&
+                    (String.IsNullOrEmpty(requestedMessage) ||
+                     TextField(item, "entry_id") == requestedMessage))) break;
             if (state == "message_identity_ambiguous")
                 throw new InvalidOperationException(state);
             if (state != "waiting" && state != "read")
@@ -2060,7 +2057,9 @@ public sealed class OutlookSession : ApplicationContext
         if (!observedConversations.TryGetValue(conversation, out observed))
             throw new InvalidOperationException("message_identity_unavailable");
         var exact = observed.Where(item => BoolField(item, "draft_known") &&
-            !BoolField(item, "is_draft")).ToList();
+            !BoolField(item, "is_draft") &&
+            (String.IsNullOrEmpty(requestedMessage) ||
+             TextField(item, "entry_id") == requestedMessage)).ToList();
         if (exact.Count != 1)
             throw new InvalidOperationException(exact.Count == 0
                 ? "message_identity_unavailable" : "message_identity_ambiguous");
@@ -2073,6 +2072,14 @@ public sealed class OutlookSession : ApplicationContext
         string domMessage = TextField(result, "dom_message_id");
         if (!String.IsNullOrEmpty(domMessage) && domMessage != messageId)
             throw new InvalidOperationException("message_identity_ambiguous");
+        if (messageRow == null && exactNavigation)
+            messageRow = new Dictionary<string, object> {
+                { "entry_id", conversation }, { "subject", TextField(record, "subject") },
+                { "received_at", TextField(record, "received_at") },
+                { "sender", Field(record, "sender") },
+                { "unread", BoolField(record, "unread") }, { "flagged", BoolField(record, "flagged") },
+                { "importance", TextField(record, "importance") }, { "lines", new string[0] }
+            };
         if (messageRow == null || ConversationId(messageRow) != conversation ||
             !String.IsNullOrEmpty(requestedMessage) && messageId != requestedMessage)
             throw new InvalidOperationException("stale_message");
@@ -2313,9 +2320,8 @@ public sealed class OutlookSession : ApplicationContext
         if (attachments == null || BoolField(record, "has_attachments") && attachments.Count == 0)
             throw new InvalidOperationException("attachment_unavailable");
         bool pdfOnly = BoolField(args, "pdf_only");
-        var selected = attachments.Where(item => !pdfOnly ||
-            !BoolField(item, "inline") &&
-            TextField(item, "filename").EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)).ToList();
+        var selected = attachments.Where(item => !BoolField(item, "inline") &&
+            (!pdfOnly || TextField(item, "filename").EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))).ToList();
         long total = selected.Sum(item => Convert.ToInt64(Field(item, "size_bytes")));
         if (selected.Count > 25 || total > 52428800)
             throw new InvalidOperationException("attachment_limit_exceeded");
@@ -2340,6 +2346,7 @@ public sealed class OutlookSession : ApplicationContext
             {
                 var downloadRequest = new Dictionary<string, object> {
                     { "phase", "download_attachment" },
+                    { "exact_message_navigation", true },
                     { "conversation_id", TextField(reference, "conversation_id") },
                     { "attachment_id", TextField(attachment, "attachment_id") }, { "filename", name }
                 };
