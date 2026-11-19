@@ -77,6 +77,21 @@ def test_uncertain_send_cannot_be_retried(tmp_path, monkeypatch):
     assert calls == ["teams_web_send_chat"]
 
 
+def test_host_rejection_before_send_is_distinct_from_an_uncertain_click(tmp_path, monkeypatch):
+    calls = []
+
+    def invoke(operation, arguments):
+        calls.append(operation)
+        return {"state": "not_sent", "reason": "draft_exists"}
+
+    setup_send(tmp_path, monkeypatch, invoke)
+    with pytest.raises(ActionError, match="stopped before sending: draft_exists"):
+        actions.teams_web_send_chat(CHAT, "test", "guarded")
+    with pytest.raises(ActionError, match="already attempted"):
+        actions.teams_web_send_chat(CHAT, "test", "guarded")
+    assert calls == ["teams_web_send_chat"]
+
+
 def test_markdown_send_passes_prepared_content_to_native(tmp_path, monkeypatch):
     calls = []
 

@@ -169,7 +169,9 @@ def _article(card: Card, *, listing: bool, promoted: bool = False) -> str:
             if kind == "receipt"
             else []
         )
-        receipt_body = _verified_mentions_html(card.body, mentions) if mentions else escape(card.body)
+        receipt_body = (
+            _verified_mentions_html(card.body, mentions) if mentions else escape(card.body)
+        )
         body = (
             f'<div class="body mail-body">{card.body_html}</div>'
             if kind == "mail" and card.body_html
@@ -260,8 +262,7 @@ def present(view: View) -> Presentation:
             f'<span class="count">{unread}</span></label>'
         )
     articles = "".join(
-        _article(card, listing=listing and not promoted, promoted=promoted)
-        for card in view.cards
+        _article(card, listing=listing and not promoted, promoted=promoted) for card in view.cards
     )
     content = (
         header

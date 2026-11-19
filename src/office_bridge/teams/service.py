@@ -364,6 +364,14 @@ def send_chat(
             arguments["mentions"] = _mention_plan_identity(mentions)
             arguments["visible_body"] = expected_body
         result = desktop.invoke("teams_web_send_chat", arguments)
+        if result.get("state") == "not_sent" and result.get("reason") in {
+            "draft_exists",
+            "identity_failed",
+            "destination_failed",
+            "workspace_unavailable",
+            "primary_state_changed",
+        }:
+            raise TeamsError(f"Teams stopped before sending: {result['reason']}.")
         if (
             result.get("state") != "observed"
             or not result.get("message_id")
@@ -401,6 +409,8 @@ def send_chat(
                 "UPDATE sends SET receipt=? WHERE id=?", (receipt.model_dump_json(), request_id)
             )
         return receipt
+    except TeamsError:
+        raise
     except Exception:
         raise TeamsError(
             "Send outcome unknown; inspect the chat before considering any retry."
