@@ -28,7 +28,11 @@
   const matchingRows = () => rows().filter(e => rowId(e) === chatId);
   const header = document.querySelector('[data-tid="chat-title"]');
   const headerMatches = () => !!header && header.textContent.trim() === title &&
-      !!document.getElementById('chat-header-' + chatId);
+      header.closest('[id^="chat-header-"]')?.id === 'chat-header-' + chatId;
+  const messageBeingEdited = message => {
+    const item = message.closest('[data-tid="chat-pane-item"]') || message;
+    return !!item.querySelector('[contenteditable="true"],button[data-tid="newMessageCommands-send"][aria-label="Done"]');
+  };
   const editors = Array.from(document.querySelectorAll('[data-tid="ckeditor"][contenteditable="true"]'))
       .filter(e => e.getClientRects().length);
   const composerRoot = editor => {
@@ -59,10 +63,13 @@
     );
     return namedFile || !!uploading;
   };
-  const hasDraft = e => e.innerText.replace(/[\n\u2060]/g, '').length > 0 ||
-      !!e.querySelector('mention,[itemtype="http://schema.skype.com/Mention"]') ||
-      !!e.querySelector('img,video,table,iframe,object,a') || e.querySelectorAll('p').length > 1 ||
-      e.querySelectorAll('br').length > 1 || pendingComposerFiles(e);
+  const draftKind = e => {
+    if (e.innerText.replace(/[\n\u2060]/g, '').length) return 'text';
+    if (e.querySelector('mention,[itemtype="http://schema.skype.com/Mention"],img,video,table,iframe,object,a') ||
+        e.querySelectorAll('p').length > 1 || e.querySelectorAll('br').length > 1) return 'markup';
+    return pendingComposerFiles(e) ? 'attachment' : '';
+  };
+  const hasDraft = e => !!draftKind(e);
   const visible = element => element.getClientRects().length > 0 &&
       getComputedStyle(element).visibility !== 'hidden';
   const chatTab = () => document.querySelector('[data-tid="app-bar-wrapper"] button[aria-label="Chat"]');
@@ -316,10 +323,10 @@
       return [a >>> 0, b >>> 0, value.length].join(':');
     };
     const signature = {
-      path: mix(location.pathname),
+      path: mix(location.href),
       chatHeader: header ? mix(header.textContent.trim()) : '',
       headerId: mix(header?.closest('[id^="chat-header-"]')?.id || ''),
-      editors: editors.map(editor => ({
+      editors: Array.from(document.querySelectorAll('[data-tid="ckeditor"][contenteditable="true"],[data-tid="chat-pane-item"] [contenteditable="true"]')).map(editor => ({
         id: mix(editor.id),
         text: mix(editor.innerText || ''),
         html: mix(editor.innerHTML),
@@ -332,8 +339,10 @@
         })()
       }))
     };
+    const inlineEdit = !!document.querySelector('[data-tid="chat-pane-item"] [contenteditable="true"],[data-tid="chat-pane-item"] button[data-tid="newMessageCommands-send"][aria-label="Done"]');
+    const draft = inlineEdit ? 'inline_edit' : editors.map(draftKind).find(Boolean) || '';
     return {state: 'snapshot', fingerprint: JSON.stringify(signature),
-      editor_count: editors.length, dirty: editors.some(hasDraft)};
+      editor_count: editors.length, dirty: !!draft, draft_kind: draft};
   }
   if (phase === 'mention_probe_draft_status') {
     return {state: 'draft_exists', exact_chat: headerMatches(), editor_count: editors.length,
@@ -692,7 +701,8 @@
     return {state: 'navigated'};
   }
   if (!headerMatches() || matchingRows().length !== 1)
-    return {state: 'waiting'};
+    return {state: 'waiting', header_id_matches: header?.closest('[id^="chat-header-"]')?.id === 'chat-header-' + chatId,
+      title_matches: header?.textContent.trim() === title, matching_rows: matchingRows().length};
   if (phase === 'upload_readiness') {
     if (editors.length !== 1)
       return {state: 'blocked', reason: 'identity_failed', composer_empty: false,
@@ -1032,7 +1042,7 @@
     if (phase === 'edit_observe') {
       if (!edit.clicked || !mainUnchanged()) return {state: 'failed'};
       const message = ownMessage();
-      if (!message || !renderedMatches(message, body, formatting) ||
+      if (!message || messageBeingEdited(message) || !renderedMatches(message, body, formatting) ||
           message.getAttribute('data-mid') !== messageId.slice('message-body-'.length))
         return {state: 'waiting'};
       let root = message;
@@ -1162,6 +1172,7 @@
   if (phase === 'read') {
     const messageNodes = Array.from(document.querySelectorAll('[data-tid="chat-pane-message"]'))
         .filter(e => e.getClientRects().length > 0);
+    if (messageNodes.some(messageBeingEdited)) return {state: 'message_edit_in_progress'};
     const oldest = messageNodes[0] || null;
     const scrollAncestors = [], scrollElements = [];
     for (let node = oldest?.parentElement, depth = 0; node && depth < 12 && node !== document.body;
@@ -1298,6 +1309,7 @@
     const message = document.getElementById(messageId);
     if (!message || message.getAttribute('data-tid') !== 'chat-pane-message')
       return {state: 'message_not_loaded'};
+    if (messageBeingEdited(message)) return {state: 'message_edit_in_progress'};
     if (mentionDiagnostics === true) {
       const relevant = Array.from(
         message.querySelectorAll('mention,[itemtype="http://schema.skype.com/Mention"]')

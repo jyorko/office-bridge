@@ -11,6 +11,8 @@ MAX_FRAME = 1_048_576
 HOST_ERRORS = frozenset(
     {
         "draft_exists",
+        "message_edit_in_progress",
+        "destination_failed",
         "identity_failed",
         "failed",
         "host_operation_failed",

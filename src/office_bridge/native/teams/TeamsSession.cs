@@ -223,7 +223,11 @@ public sealed class TeamsSession : ApplicationContext
                 throw new InvalidOperationException("host_unavailable");
             auxiliaryHost = new Form { ShowInTaskbar = false, ClientSize = new Size(1200, 900) };
             var handle = auxiliaryHost.Handle;
-            auxiliaryController = await environment.CreateCoreWebView2ControllerAsync(handle);
+            // Sharing Chromium storage restores the primary chat and its draft in both
+            // windows. Keep the auxiliary workspace separate and verify its SSO account.
+            var options = environment.CreateCoreWebView2ControllerOptions();
+            options.ProfileName = "OfficeBridgeAuxiliary";
+            auxiliaryController = await environment.CreateCoreWebView2ControllerAsync(handle, options);
             auxiliaryController.Bounds = new Rectangle(0, 0, 1200, 900);
             auxiliaryController.IsVisible = true;
             var core = auxiliaryController.CoreWebView2;
@@ -496,16 +500,31 @@ public sealed class TeamsSession : ApplicationContext
         var snapshot = await ExecuteChat(core, new Dictionary<string, object> {
             { "phase", "snapshot" }
         });
+        if (Convert.ToString(snapshot["state"]) != "snapshot")
+            throw new InvalidOperationException("identity_failed");
         if (Flag(snapshot, "dirty"))
+        {
+            Console.Error.WriteLine("Teams auxiliary navigation preserved a composer (" +
+                                    snapshot["draft_kind"] + ").");
             throw new InvalidOperationException("draft_exists");
+        }
 
+        // The verified web workspace can open a loaded conversation directly.
+        // Navigating to a sharing link first can leave this controller on the
+        // Teams launch page, where later operations cannot verify the account.
+        var selected = await ExecuteChat(core, new Dictionary<string, object> {
+            { "phase", "navigate" }, { "chatId", chatId }, { "title", title }
+        });
+        string selection = Convert.ToString(selected["state"]);
+        if (selection != "navigated" && selection != "waiting")
+            throw new InvalidOperationException(selection);
+        bool rowSelected = selection == "navigated";
         string deepLink = chatId == "48:notes"
             ? "https://teams.microsoft.com/l/chat/48%3Anotes/conversations?context=%7B%22contextType%22%3A%22chat%22%7D"
             : "https://teams.microsoft.com/l/chat/" +
               Uri.EscapeDataString(chatId) + "/conversations";
-        core.Navigate(deepLink);
+        if (!rowSelected) core.Navigate(deepLink);
         var deadline = DateTime.UtcNow.AddSeconds(25);
-        bool rowSelected = false;
         while (DateTime.UtcNow < deadline)
         {
             if (HostVisible() || OwnedForeground())
@@ -526,7 +545,7 @@ public sealed class TeamsSession : ApplicationContext
                     // Select the exact rail ID, then verify its header independently.
                     if (!rowSelected)
                     {
-                        var selected = await ExecuteChat(core, new Dictionary<string, object> {
+                        selected = await ExecuteChat(core, new Dictionary<string, object> {
                             { "phase", "navigate" }, { "chatId", chatId }, { "title", title }
                         });
                         string selectedState = Convert.ToString(selected["state"]);
@@ -538,51 +557,18 @@ public sealed class TeamsSession : ApplicationContext
             }
             await Task.Delay(200);
         }
+        Console.Error.WriteLine("Teams destination verification timed out (rail selected: " +
+                                rowSelected + ").");
         throw new InvalidOperationException("destination_failed");
     }
     async Task<string> PrimarySnapshot()
     {
-        const string snapshot = @"(() => {
-          const mix = value => {
-            let a=2166136261, b=2246822519;
-            for (let i=0;i<value.length;i++) {
-              const c=value.charCodeAt(i); a=Math.imul(a^c,16777619); b=Math.imul(b+c,3266489917);
-            }
-            return [a>>>0,b>>>0,value.length].join(':');
-          };
-          const editors=Array.from(document.querySelectorAll('[data-tid=ckeditor][contenteditable=true]'));
-          const hasDraft=e => {
-            const text=(e.innerText||'').replace(/\n/g,'').trim().length>0;
-            const rich=!!e.querySelector('img,video,table,iframe,object,a') ||
-              e.querySelectorAll('p').length>1 || e.querySelectorAll('br').length>1;
-            let root=e;
-            const send='button[data-tid=""newMessageCommands-send""],button[data-tid=""sendMessageCommands-send""]';
-            for(let i=0;root&&i<12;i++){
-              if(root===document.body||root===document.documentElement){root=null;break;}
-              if(root.querySelector(send))break;
-              root=root.parentElement;
-            }
-            const files=Array.from(document.querySelectorAll('input[type=file]'))
-              .some(input=>input.files?.length);
-            if(!root)return text||rich||files;
-            const clone=root.cloneNode(true);
-            clone.querySelectorAll('[data-tid=""ckeditor""],[contenteditable=true],button,[role=button],input')
-              .forEach(element=>element.remove());
-            const attachmentText=(clone.innerText||clone.textContent||'').replace(/\s+/g,' ').trim();
-            const namedFile=/(?:^|\s)\S{1,180}\.[A-Za-z0-9]{1,16}(?:$|\s)/i
-              .test(attachmentText);
-            const uploading=!!root.querySelector('[role=progressbar],[aria-busy=true],[data-tid*=upload-progress],[data-tid*=file-progress]');
-            return text||rich||files||namedFile||uploading;
-          };
-          const title=document.querySelector('[data-tid=chat-title]');
-          return JSON.stringify({href:location.href, title:title?.textContent.trim()||'',
-            headerId:title?.closest('[id^=chat-header-]')?.id||'',
-            dirty:editors.some(hasDraft),
-            editors:editors.map(e=>({id:e.id,text:mix(e.innerText||''),html:mix(e.innerHTML),
-              active:document.activeElement===e}))});
-        })()";
-        string raw = await controller.CoreWebView2.ExecuteScriptAsync(snapshot);
-        return Json.Deserialize<string>(raw);
+        var snapshot = await ExecuteChat(controller.CoreWebView2, new Dictionary<string, object> {
+            { "phase", "snapshot" }
+        });
+        if (Convert.ToString(snapshot["state"]) != "snapshot" || !snapshot.ContainsKey("dirty"))
+            throw new InvalidOperationException("identity_failed");
+        return Json.Serialize(snapshot);
     }
     async Task<Dictionary<string, object>> FindChats(Dictionary<string, object> args)
     {
@@ -943,17 +929,13 @@ public sealed class TeamsSession : ApplicationContext
     Dictionary<string, object> SnapshotMetadata(string snapshot)
     {
         var value = Json.Deserialize<Dictionary<string, object>>(snapshot);
-        object rawEditors;
-        var editors = value.TryGetValue("editors", out rawEditors)
-                          ? rawEditors as System.Collections.IList
-                          : null;
         string fingerprint;
         using (var sha = SHA256.Create())
             fingerprint = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(snapshot)))
                              .Replace("-", "")
                              .ToLowerInvariant();
         return new Dictionary<string, object> {
-            { "fingerprint", fingerprint }, { "editor_count", editors == null ? 0 : editors.Count },
+            { "fingerprint", fingerprint }, { "editor_count", value["editor_count"] },
             { "dirty", Flag(value, "dirty") }
         };
     }
@@ -987,7 +969,13 @@ public sealed class TeamsSession : ApplicationContext
                 await Task.Delay(200);
             }
             if (!authenticated || currentAccountName != author)
+            {
+                var surface = await Inspect(core);
+                Console.Error.WriteLine("Teams auxiliary account check failed (app: " +
+                    Flag(surface, "app") + ", login: " + Flag(surface, "login") +
+                    ", blocked: " + Flag(surface, "blocked") + ").");
                 throw new InvalidOperationException("identity_failed");
+            }
             if (ensureAuxiliaryWorkspace)
                 await EnsureChatWorkspace(core);
         }
@@ -1037,19 +1025,7 @@ public sealed class TeamsSession : ApplicationContext
                 foreach (string key in before.Keys)
                     if (!after.ContainsKey(key) || Json.Serialize(before[key]) != Json.Serialize(after[key]))
                         Console.Error.WriteLine("Primary snapshot changed field: " + key);
-            var oldEditors = before == null ? null : before["editors"] as System.Collections.IList;
-            var newEditors = after == null ? null : after["editors"] as System.Collections.IList;
-            if (oldEditors != null && newEditors != null && oldEditors.Count == newEditors.Count)
-                for (int index = 0; index < oldEditors.Count; index++)
-                {
-                    var oldEditor = oldEditors[index] as Dictionary<string, object>;
-                    var newEditor = newEditors[index] as Dictionary<string, object>;
-                    if (oldEditor == null || newEditor == null) continue;
-                    foreach (string key in oldEditor.Keys)
-                        if (!newEditor.ContainsKey(key) ||
-                            Json.Serialize(oldEditor[key]) != Json.Serialize(newEditor[key]))
-                            Console.Error.WriteLine("Primary editor changed field: " + key);
-                }
+
         }
         return unchanged;
     }
@@ -1364,6 +1340,13 @@ public sealed class TeamsSession : ApplicationContext
             if (state == "ready" || state == "navigated") phase = "read";
             else if (state == "navigate") phase = "navigate";
             else if (state != "waiting") throw new InvalidOperationException(state);
+            if (DateTime.UtcNow >= deadline.AddMilliseconds(-500) && state == "waiting")
+            {
+                object rows;
+                Console.Error.WriteLine("Teams read waiting in " + phase + " (header ID: " +
+                    Flag(result, "header_id_matches") + ", title: " + Flag(result, "title_matches") +
+                    ", matching rows: " + (result.TryGetValue("matching_rows", out rows) ? rows : null) + ").");
+            }
             await Task.Delay(150);
         }
         throw new TimeoutException();
@@ -2435,10 +2418,26 @@ public sealed class TeamsSession : ApplicationContext
              (requestedVisibleBody != visibleBody || visibleBody.Length > 2000)) ||
             (mentionPlan.Count == 0 && requestedVisibleBody != null))
             throw new InvalidDataException();
-        var context = await BeginChatContext(chatId);
+        CrossChatContext context;
+        try
+        {
+            context = await BeginChatContext(chatId);
+            if (context.ProtectPrimary)
+                await OpenExactChatOnAuxiliary(context.Core, chatId, title);
+        }
+        catch (InvalidOperationException error)
+        {
+            // This request has not entered the composer or send loop.
+            string reason = error.Message;
+            if (reason != "draft_exists" && reason != "identity_failed" &&
+                reason != "destination_failed" && reason != "workspace_unavailable" &&
+                reason != "primary_state_changed")
+                throw;
+            return new Dictionary<string, object> {
+                { "state", "not_sent" }, { "reason", reason }
+            };
+        }
         string authorName = currentAccountName;
-        if (context.ProtectPrimary)
-            await OpenExactChatOnAuxiliary(context.Core, chatId, title);
         var validationRequest = new Dictionary<string, object> {
             { "phase", "validate_payload" }, { "body", body }, { "bodyFormat", bodyFormat },
             { "html", html }, { "nodes", nodes }, { "formatting", formatting }
@@ -2983,7 +2982,7 @@ public sealed class TeamsSession : ApplicationContext
                             "^[a-z][a-z0-9_]{1,80}$") ? error.Message : "host_operation_failed";
                         string reason = diagnosticReason;
                         var safeReasons = new HashSet<string>(StringComparer.Ordinal) {
-                            "draft_exists", "identity_failed", "failed", "foreground_interference",
+                            "draft_exists", "message_edit_in_progress", "destination_failed", "identity_failed", "failed", "foreground_interference",
                             "primary_state_changed", "script_changed_during_operation",
                             "workspace_unavailable", "search_control_unavailable", "lookup_timeout",
                             "lookup_ambiguous_use_email", "lookup_results_unverified",

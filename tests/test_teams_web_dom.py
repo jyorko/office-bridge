@@ -1357,6 +1357,23 @@ def test_edit_preserves_unchanged_leading_mention_and_saves_same_message_once(pa
     assert page.locator("#main-composer").inner_text().strip() == ""
 
 
+def test_inline_draft_cannot_be_read_as_a_settled_message(page):
+    message_id, _ = mount_editable_message(page, "<p>Posted text</p>")
+    page.locator(f"#{message_id}").evaluate(
+        """message => {
+          const item = message.parentElement;
+          item.dataset.tid = 'chat-pane-item';
+          item.insertAdjacentHTML('beforeend',
+            '<div contenteditable="true">Unsaved replacement</div>' +
+            '<button data-tid="newMessageCommands-send" aria-label="Done">Done</button>');
+        }"""
+    )
+    assert run(page, "snapshot")["dirty"] is True
+    for phase in ("read", "inspect_message"):
+        assert run(page, phase, message_id=message_id) == {"state": "message_edit_in_progress"}
+    assert page.get_by_text("Unsaved replacement", exact=True).is_visible()
+
+
 def test_edit_uses_ckeditor_model_api_for_replacement(page):
     message_id, expected = mount_editable_message(page, "<p>before</p><p>second paragraph</p>")
     args = {"message_id": message_id, "expected_text": expected, "body": "after"}

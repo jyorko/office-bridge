@@ -365,8 +365,7 @@ def check_rich_mail_ui(page, app):
         assert app.locator("html").evaluate("(node) => node.scrollWidth <= node.clientWidth")
         page.screenshot(
             path=str(
-                Path(__file__).resolve().parents[1]
-                / f".state/mail-rendering-{width}-dark.png"
+                Path(__file__).resolve().parents[1] / f".state/mail-rendering-{width}-dark.png"
             ),
             full_page=True,
         )
@@ -418,9 +417,7 @@ def check_host_open_links(browser):
         )
     link = app.get_by_role("link", name="Open note")
     link.click()
-    assert page.evaluate("window.openRequests") == [
-        {"url": "https://example.invalid/selected"}
-    ]
+    assert page.evaluate("window.openRequests") == [{"url": "https://example.invalid/selected"}]
     assert not page.evaluate("window.calls")
     page.close()
 
@@ -461,7 +458,9 @@ def check_receipt_ui(page, app):
             assert app.locator("html").evaluate("(node) => node.scrollWidth <= node.clientWidth")
         if len(text) > 400:
             page.screenshot(
-                path=str(Path(__file__).resolve().parents[1] / ".state/receipt-rendering-360-dark.png"),
+                path=str(
+                    Path(__file__).resolve().parents[1] / ".state/receipt-rendering-360-dark.png"
+                ),
                 full_page=True,
             )
     assert page.evaluate("window.calls.length") == calls_before
@@ -593,9 +592,7 @@ def check_synthetic_reader():
         browser = pw.chromium.launch(channel="msedge", headless=True)
         page = browser.new_page(viewport={"width": 1100, "height": 800})
         page.set_content(HOST)
-        page.locator("iframe").evaluate(
-            "(frame, html) => frame.srcdoc = html", app_html()
-        )
+        page.locator("iframe").evaluate("(frame, html) => frame.srcdoc = html", app_html())
         page.wait_for_function("window.initialized")
         app = page.frame_locator("iframe")
         check_rich_mail_ui(page, app)
@@ -665,7 +662,9 @@ if __name__ == "__main__":
         )
     elif "--synthetic-reader-only" in sys.argv:
         check_synthetic_reader()
-        print("Verified synthetic reader rendering, safe links, verified mentions, and desktop/mobile layouts without Office actions.")
+        print(
+            "Verified synthetic reader rendering, safe links, verified mentions, and desktop/mobile layouts without Office actions."
+        )
     else:
         resource, displays = load_results()
         check_ui(resource, displays)
