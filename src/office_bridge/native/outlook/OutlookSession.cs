@@ -411,7 +411,8 @@ public sealed class OutlookSession : ApplicationContext
             environment = await CoreWebView2Environment.CreateAsync(null, profile, options);
             controller = await environment.CreateCoreWebView2ControllerAsync(host.Handle);
             var core = controller.CoreWebView2;
-            core.IsMuted = false;
+            core.IsMuted = true;
+            core.NotificationReceived += (s, e) => { e.Handled = true; };
             controller.Bounds = new Rectangle(0, 0, 1200, 900);
             controller.IsVisible = true;
             core.Settings.IsWebMessageEnabled = false;

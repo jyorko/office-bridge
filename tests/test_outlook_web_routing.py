@@ -98,10 +98,10 @@ def test_launcher_keeps_outlook_window_hidden_by_default():
     assert '"-Visible"' not in supervisor
 
 
-def test_outlook_webview2_audio_is_enabled_before_navigation():
+def test_outlook_webview2_audio_is_muted_before_navigation():
     source = (desktop.NATIVE / "outlook" / "OutlookSession.cs").read_text(encoding="utf-8")
     assert source.count("CreateCoreWebView2ControllerAsync") == 1
-    assert source.index("core.IsMuted = false;") < source.index(
+    assert source.index("core.IsMuted = true;") < source.index(
         'core.Navigate("https://outlook.office.com/mail/")'
     )
     assert '{ "audio_muted", controller.CoreWebView2.IsMuted }' in source

@@ -133,7 +133,8 @@ public sealed class TeamsSession : ApplicationContext
             controller.Bounds = new Rectangle(0, 0, 1200, 900);
             controller.IsVisible = true;
             var core = controller.CoreWebView2;
-            core.IsMuted = false;
+            core.IsMuted = true;
+            core.NotificationReceived += (s, e) => { e.Handled = true; };
             core.Settings.IsWebMessageEnabled = false;
             core.Settings.AreHostObjectsAllowed = false;
             core.Settings.AreDefaultScriptDialogsEnabled = false;
@@ -231,7 +232,8 @@ public sealed class TeamsSession : ApplicationContext
             auxiliaryController.Bounds = new Rectangle(0, 0, 1200, 900);
             auxiliaryController.IsVisible = true;
             var core = auxiliaryController.CoreWebView2;
-            core.IsMuted = false;
+            core.IsMuted = true;
+            core.NotificationReceived += (s, e) => { e.Handled = true; };
             core.FrameCreated += (s, e) => TrackAuxiliaryFrame(e.Frame);
             core.Settings.IsWebMessageEnabled = false;
             core.Settings.AreHostObjectsAllowed = false;
@@ -274,7 +276,8 @@ public sealed class TeamsSession : ApplicationContext
             copilotController.Bounds = new Rectangle(0, 0, 1200, 900);
             copilotController.IsVisible = true;
             var created = copilotController.CoreWebView2;
-            created.IsMuted = false;
+            created.IsMuted = true;
+            created.NotificationReceived += (s, e) => { e.Handled = true; };
             created.Settings.IsWebMessageEnabled = false;
             created.Settings.AreHostObjectsAllowed = false;
             created.Settings.AreDefaultScriptDialogsEnabled = false;
